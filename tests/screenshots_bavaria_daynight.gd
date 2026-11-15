@@ -39,6 +39,19 @@ func _run() -> void:
 		await _save("waldrand_dicht")
 		get_tree().quit()
 		return
+	var cam_arg := String(Game.cli.get("cam", ""))
+	if cam_arg != "":
+		# Freie Kontrollansicht: --cam=x,y,z;bx,by,bz [--hour=19.35] [--tag=name] (y = Fußhöhe, Auge +1,7 m)
+		var parts := cam_arg.split(";")
+		var pv := parts[0].split_floats(",")
+		var dv := parts[1].split_floats(",")
+		m.day_night.set_hour(float(Game.cli.get("hour", "19.35")), 0.0)
+		camera.global_position = Vector3(pv[0], pv[1] + 1.7, pv[2])
+		camera.look_at(camera.global_position + Vector3(dv[0], dv[1], dv[2]))
+		_report_near(Vector3(pv[0], pv[1], pv[2]), 12.0)
+		await _save(String(Game.cli.get("tag", "kamera")))
+		get_tree().quit()
+		return
 	var h16 := m.static_root.get_node("haus_16") as Node3D
 	var og: Array = h16.get_meta("og_shooting_windows", [])
 	var road: Array = m.layout["paths"][0]["points"]
@@ -86,6 +99,27 @@ func _run() -> void:
 	camera.look_at(r1 + Vector3.UP * 1.0)
 	await _save("nacht_laternenreihe")
 	get_tree().quit()
+
+## Listet sichtbare Geometrie, deren Weltbox näher als r (waagrecht) an p liegt (Fehlersuche).
+func _report_near(p: Vector3, r: float) -> void:
+	for gi in m.find_children("*", "GeometryInstance3D", true, false):
+		var g := gi as GeometryInstance3D
+		if not g.is_visible_in_tree():
+			continue
+		var boxes: Array[AABB] = []
+		if g is MultiMeshInstance3D:
+			var mm := (g as MultiMeshInstance3D).multimesh
+			if mm == null or mm.mesh == null:
+				continue
+			for k in mm.instance_count:
+				boxes.append(g.global_transform * mm.get_instance_transform(k) * mm.mesh.get_aabb())
+		else:
+			boxes.append(g.global_transform * g.get_aabb())
+		for k in boxes.size():
+			var b: AABB = boxes[k]
+			var c := Vector2(clampf(p.x, b.position.x, b.end.x), clampf(p.z, b.position.z, b.end.z))
+			if c.distance_to(Vector2(p.x, p.z)) < r and b.size.length() > 1.0:
+				print("NAH %s [%d] box=%s" % [g.get_path(), k, b])
 
 func _save(id: String) -> void:
 	camera.reset_physics_interpolation()

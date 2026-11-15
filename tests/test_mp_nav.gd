@@ -7,6 +7,18 @@ extends "res://tests/test_gameplay.gd"
 const SNAP_H := 1.5      ## Punkt gilt als „auf dem Netz“, wenn der nächste Netzpunkt so nah liegt (waagerecht)
 const SNAP_V := 1.2
 const REACH := 1.5       ## Pfadende so nah am Ziel = erreichbar
+## B-010c: Kampagnenfiguren, die auch der Spieler nicht zu Fuß erreicht (Name beginnt mit Schlüssel), mit Begründung.
+## Sie zählen als „getrennt (begründet)“ statt als Fehler und stehen im Bericht. Nur mit Beleg eintragen.
+const SEPARATED := {
+	"nw1_dampfleitung": {
+		# Tirpitz (m_tirpitz low, Decks t_palub01–09 bei 6,8 m): kein Laufweg vom Kai, keine Leiter/Gangway am Rumpf
+		# (Modellframes: nur Taue t_lanov*, Ketten t_retez*, Anker t_kotva*); Wege enden am Rumpf auf Wasserhöhe 0,2 m.
+		"tirpic_guard_": "Tirpitz-Deck, kein Laufweg vom Land",
+		# steht auf der Mastplattform o_stozar12 (27,1 m; probe_nav: kein Netz im Umkreis 6 m); alle 7 Leitern der Karte
+		# enden ≤ 7,5 m, keine Treppe dorthin (Skript HUMAN_Suspend, bleibt stehen)
+		"bonzak": "Mastplattform o_stozar12 27 m ohne Zugang",
+	},
+}
 
 var rows: Array[String] = []
 var report_path := ""
@@ -122,12 +134,19 @@ func _test_map(id: String) -> void:
 	var reach := 0
 	var notes: Array[String] = []
 	var snapped: Array = []
+	var sep := 0
+	var sep_done := {}
 	for p in pts:
 		var c := NavigationServer3D.map_get_closest_point(nav_map, p[1])
 		var ok := _near(c, p[1], SNAP_H, SNAP_V)
 		snapped.append(c if ok else Vector3.INF)
 		if ok:
 			on += 1
+		elif _separated(id, p[0]) != "":
+			on += 1
+			sep += 1
+			sep_done[p[0]] = true
+			notes.append("%s getrennt (begründet: %s, nicht auf dem Netz)" % [p[0], _separated(id, p[0])])
 		elif notes.size() < 6:
 			notes.append("%s %s nicht auf dem Netz (nächster %s)" % [p[0], _v(p[1]), _v(c)])
 	# Bezugspunkt: Punkt, von dem aus die meisten anderen erreichbar sind (erste Zone bzw. erster Spawn als Start)
@@ -149,11 +168,18 @@ func _test_map(id: String) -> void:
 			if snapped[j].is_finite():
 				if _reachable(nav_map, snapped[best], snapped[j]):
 					reach += 1
+				elif _separated(id, pts[j][0]) != "":
+					reach += 1
+					sep += 1
+					notes.append("%s getrennt (begründet: %s)" % [pts[j][0], _separated(id, pts[j][0])])
 				elif notes.size() < 10:
 					var pth := _path(nav_map, snapped[best], snapped[j])
 					notes.append("%s %s nicht erreichbar (von %s, Pfad endet %s)" % [pts[j][0], _v(pts[j][1]),
 						_v(snapped[best]), _v(pth[pth.size() - 1]) if pth.size() > 0 else "-"])
+	reach += sep_done.size()     # begründet getrennt und nicht auf dem Netz
 	var n_pts := pts.size()
+	if sep > 0:
+		print("MPNAV %s: %d Punkte begründet getrennt (SEPARATED)" % [id, sep])
 	if Game.cli.has("nav_png"):
 		_draw_png(m, id, pts, snapped, best, nav_map)
 	print("MPNAV %s: %d Polygone, %d Punkte, %d auf dem Netz, %d erreichbar" % [id, polys, n_pts, on, reach])
@@ -273,6 +299,14 @@ static func _fill_poly(img: Image, p: PackedVector2Array, c: Color) -> void:
 		for k in range(0, xs.size() - 1, 2):
 			for x in range(maxi(int(xs[k]), 0), mini(int(xs[k + 1]) + 1, img.get_width())):
 				img.set_pixel(x, y, c)
+
+
+func _separated(id: String, label: String) -> String:
+	var who := label.get_slice(" ", 1).to_lower()
+	for k in SEPARATED.get(id, {}):
+		if who.begins_with(String(k)):
+			return String(SEPARATED[id][k])
+	return ""
 
 
 func _reachable(nav_map: RID, a: Vector3, b: Vector3) -> bool:

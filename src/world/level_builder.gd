@@ -378,6 +378,8 @@ func line_wall(a: Vector2, b: Vector2, h: float, thickness: float, material: Str
 
 const FENCE_LAYER := 1 << 4   ## Physik-Layer 5: blockiert Bewegung, nicht Sicht/Kugeln
 const BORDER_LAYER := 1 << 14 ## Physik-Layer 15: Kartengrenze „Border - enemy filter“ – sperrt nur Trupp/Spieler (Soldier.move_mask)
+## B-010c: Physik-Layer 23 = nur Navmesh-Quelle (Mission._bake_navigation), keine Kollision mit Figuren/Geschossen
+const NAV_ONLY_LAYER := 1 << 22
 
 ## Stacheldrahtzaun von a nach b mit Lücken [Versatz, Breite].
 func fence(a: Vector2, b: Vector2, gaps: Array = [], h := 1.8) -> void:

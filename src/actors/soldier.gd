@@ -26,7 +26,12 @@ enum Stance { STAND, CROUCH, PRONE }
 ## Spielers (moderne Steuerung: immer Laufschritt, Shift = Sprint/RUN, leise nur geduckt/liegend)
 enum MoveMode { WALK, RUN, SNEAK, JOG }
 
-const FALL_SAFE_V := 9.0
+## Fallschaden (0.11.6, hd2.exe 0x770C30 [B], docs/status/fall_damage.md): Höhe = höchster Punkt im Flug − Landepunkt;
+## Schaden = (Höhe − 3 m) · 240 zotti, höchstens 1000 zotti; 1 LP = 10 zotti (re_notes_weapons §10b).
+const FALL_SAFE_H := 3.0          ## [B] 0x816760
+const FALL_ZOTTI_PER_M := 240.0   ## [B] 0x816764
+const FALL_ZOTTI_MAX := 1000.0    ## [B] 0x80F708 / 0x447A0000
+const FALL_LP_PER_ZOTTI := 0.1    ## = OrigMission.HP_SCALE
 const TEAM_ALLIED := 0
 const _CF := preload("res://src/combat/combat_flags.gd")
 const TEAM_AXIS := 1
@@ -80,6 +85,10 @@ var aiming := false
 var lean := 0.0                     ## -1 links .. 1 rechts
 var aim_point := Vector3.ZERO       ## Weltpunkt, auf den die Waffe zielt
 var has_aim_point := false
+## 0.11.6 [B] hd2.exe 0x5433B0: in der 1. Person startet der Schuss an der Kamera (0x492790) in Blickrichtung (0x492880)
+## – Kamera des PlayerControllers (CameraRig), im Schussmoment gelesen (vorher Zielpunkt aus dem letzten Physikschritt:
+## beim Wackeln bis 3 cm auf 300 m neben der gezeigten Bildmitte). null = Augpunkt (3. Person/KI).
+var aim_rig: Node = null
 var fpv_muzzle: Node3D = null       ## Mündung der FPV-Waffe (CameraRig setzt sie in der 1. Person), sonst null
 var extra_spread := 0.0             ## Zusatzstreuung (Grad), z. B. KI-Fehler
 var is_player_controlled := false
@@ -539,6 +548,7 @@ func _physics_process(delta: float) -> void:
 		aiming = false
 	_update_stance(delta)
 	_update_movement(delta)
+	_fall_track(delta)
 	_update_weapon(delta)
 	rotation.y = look_yaw
 	# Lehnen an die anderen Rechner (Netzfigur zeigt den Original-Lehnclip)
@@ -663,10 +673,7 @@ func _update_movement(delta: float) -> void:
 	# Landung nach Sprung/Fall: Schritt auf dem Untergrund (Original-Schrittklang, Lautstärke nach Aufprall – Annahme)
 	if not was_floor and is_on_floor() and vy_before < -3.0:
 		OrigAudio.play_step(global_position, null, clampf(-vy_before / 6.0, 0.5, 1.0))
-	# Mehrspieler-Regel „Verletzung beim Fallen“ (fallingdmg): Aufprall > 9 m/s (≈ 4 m Fallhöhe) verletzt;
-	# Schwelle und Stärke sind Annahmen (Originalformel nicht dekodiert). Einzelspieler unverändert.
-	if Net.is_online and is_on_floor() and vy_before < -FALL_SAFE_V and (is_player_controlled or Net.is_authority()):
-		Net.fall_damage(self, (-vy_before - FALL_SAFE_V) * 15.0)
+	# Fallschaden: siehe _fall_track (0.11.6, Formel hd2.exe 0x770C30, docs/status/fall_damage.md)
 
 	# Ausdauer: Rennen kostet, Gewicht der Ausrüstung erhöht den Verbrauch.
 	var moving := current_speed() > 0.3
@@ -715,20 +722,21 @@ func is_climbing() -> bool:
 
 
 ## Sprungtaste: aus Hocke/Liegen aufstehen; stehend vor einem Hindernis hinaufklettern bzw.
-## darüber steigen, sonst springen.
-func jump_or_climb() -> void:
+## darüber steigen, sonst springen. Leitern [D]: Spieler steigen nur per Benutzen-Taste ein
+## (use_ladder = false); KI/Bots (Aufruf ohne Argument) dürfen weiter über Springen an die Leiter.
+func jump_or_climb(use_ladder := true) -> void:
 	if stance != Stance.STAND:
 		stance_request = Stance.STAND
 		return
 	if _climb_t > 0.0 or not is_on_floor() or vehicle != null:
 		return
-	# Original-Leiter in Reichweite: Springen klettert sie hinauf/hinunter (moderne Steuerung)
-	for l in get_tree().get_nodes_in_group("ladders"):
-		var ln := l as Node3D
-		var dxz := Vector2(ln.global_position.x - global_position.x, ln.global_position.z - global_position.z).length()
-		if dxz < 1.3 and l.can_interact(self):
-			l.climb(self)
-			return
+	if use_ladder:
+		for l in get_tree().get_nodes_in_group("ladders"):
+			var ln := l as Node3D
+			var dxz := Vector2(ln.global_position.x - global_position.x, ln.global_position.z - global_position.z).length()
+			if dxz < 1.3 and l.can_interact(self):
+				l.climb(self)
+				return
 	if not try_climb():
 		_jump_request = true
 
@@ -742,17 +750,29 @@ func jump_only() -> void:
 		_jump_request = true
 
 
-## B-015: Original KLETTERN als eigene Aktion: Leiter in Reichweite oder Hindernis vor dem Soldaten, nie springen.
+## B-015: Original KLETTERN als eigene Aktion: Hindernis vor dem Soldaten, nie springen. Leitern nur per Benutzen.
 func climb_only() -> bool:
 	if stance != Stance.STAND or _climb_t > 0.0 or not is_on_floor() or vehicle != null:
 		return false
-	for l in get_tree().get_nodes_in_group("ladders"):
-		var ln := l as Node3D
-		var dxz := Vector2(ln.global_position.x - global_position.x, ln.global_position.z - global_position.z).length()
-		if dxz < 1.3 and l.can_interact(self):
-			l.climb(self)
-			return true
 	return try_climb()
+
+
+## Gerade auf einer Leiter (Kletterweg mit Leiteranimation)?
+func is_on_ladder() -> bool:
+	return _climb_t > 0.0 and _climb_ladder
+
+
+## Leiter verlassen (erneut Benutzen oder Springen während des Kletterns): zurück zum Einstiegspunkt,
+## Dauer anteilig zum bereits gekletterten Weg. Bewegung läuft über den normalen Zustandsabgleich (kein neues RPC).
+func ladder_dismount() -> bool:
+	if not is_on_ladder():
+		return false
+	var done := clampf(1.0 - _climb_t / _climb_dur, 0.0, 1.0)
+	var here := global_position
+	var back := _climb_from + Vector3.UP * 0.05
+	var mid := Vector3(back.x, here.y, back.z).lerp(here, 0.5)
+	start_path_climb(here, mid, back, maxf(_climb_dur * done, 0.3))
+	return true
 
 
 func try_climb() -> bool:
@@ -852,6 +872,50 @@ func _step_up(delta: float) -> void:
 ## verliert die runde Kapselunterseite den Boden (Kantennormale), floor_snap greift nicht und die Figur „fliegt“
 ## 0,4 s die Treppe hinab. Lag sie eben noch auf dem Boden und ist nicht gesprungen, wird sie auf eine begehbare
 ## Fläche höchstens STEP_HEIGHT tiefer gesetzt [E].
+var _fall_apex := NAN       ## höchster Punkt seit Verlassen des Bodens (hd2.exe Fallobjekt +0xFC, NAN = −10000,1)
+var _fall_last_y := NAN
+var last_fall := {}         ## letzte Landung {h, damage} (Tests/Bericht)
+
+
+## Schaden in LP für eine Fallhöhe h [m] (hd2.exe 0x770C30, Landezweig 0x770C8A).
+static func fall_damage_for(h: float) -> float:
+	if h <= FALL_SAFE_H:
+		return 0.0
+	return minf((h - FALL_SAFE_H) * FALL_ZOTTI_PER_M, FALL_ZOTTI_MAX) * FALL_LP_PER_ZOTTI
+
+
+## Fallhöhe verfolgen (je Physikbild nach der Bewegung). Leiter/Klettern/Stellung/Fahrzeug/Wasser setzen zurück
+## (Leiter: Original setzt +0xFC im Leiterzustand zurück [P]; Wasser [D]). Sprung > 1,5 m je Bild = Versetzen → neu messen.
+func _fall_track(delta: float) -> void:
+	var y := global_position.y
+	var jumped := not is_nan(_fall_last_y) and absf(y - _fall_last_y) > absf(velocity.y) * delta + 1.5
+	_fall_last_y = y
+	if _climb_t > 0.0 or mounted != null or vehicle != null or swimming or not alive:
+		_fall_apex = NAN
+		return
+	if is_on_floor():
+		if not is_nan(_fall_apex) and not jumped:
+			var h := _fall_apex - y
+			_fall_apex = NAN
+			_on_fall_landed(h)
+		_fall_apex = NAN
+		return
+	_fall_apex = y if (is_nan(_fall_apex) or jumped) else maxf(_fall_apex, y)
+
+
+## Landung: Schaden nach Fallhöhe. SP immer (Spielmodus 7), MP nur mit Regel fallingdmg (+0x258), Server entscheidet.
+func _on_fall_landed(h: float) -> void:
+	var dmg := fall_damage_for(h)
+	last_fall = {"h": h, "damage": dmg}
+	if dmg <= 0.0:
+		return
+	if Net.is_online:
+		if is_player_controlled or Net.is_authority():
+			Net.fall_damage(self, dmg)
+		return
+	apply_hit(dmg, &"legs", self, Vector3.DOWN)
+
+
 var _air_t := 0.0
 var _stepped_up_t := 0.0     ## nach einem Step-up kein Step-down (sonst Pendeln an der Stufe)
 
@@ -1110,6 +1174,13 @@ func stance_allows_fire(data: WeaponData) -> bool:
 
 func _fire_shot(w: Weapon) -> void:
 	var origin := eye_position()
+	if is_player_controlled and is_instance_valid(aim_rig) and aim_rig.get("target") == self and bool(aim_rig.get("fpv_active")) \
+			and vehicle == null and not is_instance_valid(mounted):
+		var cam: Camera3D = aim_rig.get("camera")
+		if cam and cam.global_position.distance_to(origin) < 1.5:
+			origin = cam.global_position
+			aim_point = aim_rig.crosshair_point()
+			has_aim_point = true
 	if is_instance_valid(mounted) and mounted.has_method("shot_origin"):
 		origin = mounted.shot_origin()
 	var veh_gun := false

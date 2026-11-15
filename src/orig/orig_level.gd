@@ -54,6 +54,7 @@ func build() -> bool:
 		return false
 	root.add_child(scene)
 	_index(scene)
+	_apply_scene2_frames()
 	var klz := _load_collision_info()
 	if not klz:
 		_add_collision(scene)
@@ -95,12 +96,32 @@ const WALK_PATCHES := {
 		{"kind": "stair", "a": Vector3(-90.2, 6.8, -326.3), "b": Vector3(-89.1, 9.0, -324.4)},
 		{"kind": "stair", "a": Vector3(-91.9, 9.4, -323.3), "b": Vector3(-91.2, 11.4, -321.8)},
 		{"kind": "stair", "a": Vector3(-106.8, 9.4, -316.0), "b": Vector3(-106.1, 11.4, -314.5)},
+		# B-010c: T9/T10/T11 enden auf dem Geländer-/Plattformteil t_zab51 bzw. t_01pat17 (9,16) ohne Netz – der Link oben
+		# fand kein Polygon. „navramp“ = Rampe über die Trittkanten nur als Navmesh-Quelle (Physik-Layer 23, keine Kollision):
+		# Lauf samt oberstem Tritt kommen ins Netz, Soldaten laufen weiter auf den echten Tritten (feste Rampen ≈ 45°
+		# ließen Soldaten auf T12/T13 hängen).
+		{"kind": "navramp", "a": Vector3(-110.3, 6.8, -316.3), "b": Vector3(-109.5, 9.0, -314.3), "w": 0.8},
+		{"kind": "navramp", "a": Vector3(-115.9, 6.8, -330.2), "b": Vector3(-115.1, 9.0, -328.2), "w": 0.8},
+		{"kind": "navramp", "a": Vector3(-97.7, 6.8, -339.1), "b": Vector3(-96.6, 9.0, -337.2), "w": 0.8},
+		# übrige Tirpitz-Stahltreppen T12–T16 (gleiche Bauart, Austritt ebenfalls ohne Netz)
+		{"kind": "navramp", "a": Vector3(-57.8, 6.7, -249.9), "b": Vector3(-58.7, 9.0, -252.0), "w": 0.8},
+		{"kind": "navramp", "a": Vector3(-69.9, 6.7, -244.1), "b": Vector3(-71.1, 9.0, -246.0), "w": 0.8},
+		{"kind": "navramp", "a": Vector3(-90.2, 6.8, -326.3), "b": Vector3(-89.1, 9.0, -324.4), "w": 0.8},
+		# T15/T16 beginnen auf dem Zwischenpodest 9,16 (t_zab51/t_01pat17), das Recast nicht vernetzt: Rampe ab Podesthöhe,
+		# Netzfläche vom Austritt T9 bzw. T14 zum Fuß T15 bzw. T16 (Podest selbst trägt Soldaten, ist nur nicht im Netz)
+		{"kind": "navramp", "a": Vector3(-92.2, 9.16, -323.9), "b": Vector3(-91.2, 11.4, -321.8), "w": 0.8},
+		{"kind": "navramp", "a": Vector3(-107.1, 9.16, -316.6), "b": Vector3(-106.1, 11.4, -314.5), "w": 0.8},
+		{"kind": "navramp", "a": Vector3(-109.5, 9.16, -314.3), "b": Vector3(-107.1, 9.16, -316.6), "w": 0.8},
+		{"kind": "navramp", "a": Vector3(-89.1, 9.16, -324.4), "b": Vector3(-92.2, 9.16, -323.9), "w": 0.8},
 	],
 
 	# ARCTIC2 T1 (B-036: keine Lauf-Korrektur nötig, T1_sten_67 ist die schräge Innenbegrenzung): B-010b nur Navigation –
 	# die Stockwerke waren im Netz nur senkrecht verbunden (Scherentreppe, Läufe überdecken sich) → Link je Rampe 01–08.
 	"arctic2": [
 		{"kind": "ramp_links", "match": "xT1_schod_", "a": Vector3.ZERO, "b": Vector3.ZERO},
+		# B-010c: Treppenhäuser Ost (x_schody11–14, test_stairs T1/T6/T8/T11) und West (x_schody15a/17/18/170/180) wie T1;
+		# Link-Enden heftet Mission._snap_stair_links an die Podest-Polygone
+		{"kind": "ramp_links", "match": "x_schody1", "a": Vector3.ZERO, "b": Vector3.ZERO},
 		# B-010c: Startinsel Commando1 (24,5; 0; −64,6) bleibt offen – zwei Links (Insel→T17-Rampe, Rampenabsatz→Außengelände
 		# 2,4) brachten test_mp_nav keine Verbindung (Stand docs/status/b010c_b032c.md); Art "link" steht dafür bereit.
 	],
@@ -156,6 +177,7 @@ func _ramp_links(body: Node3D, pat: String) -> void:
 		body.add_child(link)
 		link.start_position = a - dir * 0.6
 		link.end_position = b + dir * 0.6
+		link.set_meta("ramp_ends", [a, b])     # B-010c: Mission._snap_stair_links bindet auch die Rampenenden an
 		stats["stair_links"] = int(stats.get("stair_links", 0)) + 1
 		if Game.cli.has("klz_debug"):
 			print("KLZ: Rampen-Link %s %s -> %s" % [mi.name, link.start_position, link.end_position])
@@ -218,6 +240,20 @@ func _apply_walk_patches() -> void:
 			var basis := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, pitch)
 			cs.transform = Transform3D(basis, (a + b) * 0.5 - basis.y * thick * 0.5)
 		cs.shape = box
+		if p["kind"] == "navramp":
+			# B-010c: nur Navmesh-Quelle (Physik-Layer 23), Figuren/Geschosse/Sicht unberührt
+			if Game.cli.has("nav_stair_links_off"):
+				continue
+			var nb := root.get_node_or_null("NavOnlyPatches") as StaticBody3D
+			if nb == null:
+				nb = StaticBody3D.new()
+				nb.name = "NavOnlyPatches"
+				nb.collision_layer = LevelBuilder.NAV_ONLY_LAYER
+				nb.collision_mask = 0
+				root.add_child(nb)
+			nb.add_child(cs)
+			stats["nav_ramps"] = int(stats.get("nav_ramps", 0)) + 1
+			continue
 		body.add_child(cs)
 
 
@@ -231,6 +267,47 @@ var volumetric_nodes: Array = []
 var _lm_level := {}            ## Frame-Name -> aktive Skriptstufe
 const GLOW_LIGHT_RANGE := 8.0  ## m [E]
 const GLOW_LIGHT_ENERGY := 1.5 ## [E]
+
+
+## Fix Türteile (0.11.6): Lage-Ergänzungen aus scene2.bin (lightmaps.json „frames“, tools/fmt_lightmaps.py) [B]:
+## Objekte ohne Typ überschreiben pos/rot/scale eines scene.4ds-Frames (lokal zum Eltern-Frame) und tragen die Weltlage
+## 0x002C. Angewandt nur, wenn Eltern × lokal diese Weltlage trifft (Konvention belegt) und die 4DS-Lage abweicht.
+## ARCTIC2 p4sah16: Türzarge lag im 4DS um 180° verdreht quer neben der Öffnung.
+const SCENE2_POS_EPS := 0.05
+func _apply_scene2_frames() -> void:
+	var fr: Dictionary = _read_json(mission_dir + "/lightmaps.json").get("frames", {})
+	for nm in fr:
+		var e: Dictionary = fr[nm]
+		var c: Node3D = nodes.get(String(nm).validate_node_name(), nodes.get(String(nm)))
+		if c == null or not c.is_inside_tree():
+			continue
+		var pn := String(e.get("parent", ""))
+		var p: Node3D = c.get_parent() as Node3D
+		if pn != "":
+			p = nodes.get(pn.validate_node_name(), nodes.get(pn))
+		if p == null or p == c or c.is_ancestor_of(p):
+			continue
+		var t: Array = e.get("pos", [0, 0, 0])
+		var r: Array = e.get("rot", [0, 0, 0, 1])
+		var s: Array = e.get("scale", [1, 1, 1])
+		var w: Array = e.get("world", t)
+		var local := Transform3D(Basis(Quaternion(r[0], r[1], r[2], r[3]).normalized()).scaled(Vector3(s[0], s[1], s[2])),
+			Vector3(t[0], t[1], t[2]))
+		var want := p.global_transform * local
+		if want.origin.distance_to(Vector3(w[0], w[1], w[2])) > SCENE2_POS_EPS:
+			continue                       # Konvention nicht bestätigt → 4DS-Lage behalten
+		var have := c.global_transform
+		var rot_diff := have.basis.orthonormalized().get_rotation_quaternion().angle_to(want.basis.orthonormalized().get_rotation_quaternion())
+		if have.origin.distance_to(want.origin) < 0.02 and rot_diff < deg_to_rad(1.0) and c.get_parent() == p:
+			continue
+		if c.get_parent() != p:
+			c.reparent(p, true)
+		c.global_transform = want
+		stats["scene2_frames"] = int(stats.get("scene2_frames", 0)) + 1
+		scene2_moved.append(String(nm))
+
+
+var scene2_moved: Array[String] = []   ## Frames, deren Lage aus scene2.bin übernommen wurde (Test test_door_parts)
 
 
 func _read_json(path: String) -> Dictionary:
@@ -248,7 +325,17 @@ func _build_display_extras() -> void:
 	var fs := _read_json(mission_dir + "/scene.json")
 	for k in fs.get("scripts", {}):
 		scripted[String(k)] = true
-	# Umhängung nur für Glow-/Lichtkegel-Frames und Kinder skriptgesteuerter Frames (statische Wände bleiben unberührt) [E]
+	# Fix Türteile (0.11.6): auch Kinder beweglicher Akteur-Frames (Türen/Schranken/Schalter … aus interactive.json)
+	# umhängen – ARCTIC2 m_okn_d_04/09/10 (Türfenster mit Gitter) hängen laut scene2.bin 0x4020 an m_dv_m04/m10/m11,
+	# blieben sonst statisch im Türrahmen stehen, während der Flügel aufging [B scene2.bin].
+	var inter := _read_json(mission_dir + "/interactive.json")
+	for cat in inter:
+		if typeof(inter[cat]) != TYPE_ARRAY:
+			continue
+		for e in inter[cat]:
+			if typeof(e) == TYPE_DICTIONARY and e.has("name"):
+				scripted[String(e["name"])] = true
+	# Umhängung nur für Glow-/Lichtkegel-Frames und Kinder skriptgesteuerter Frames/Akteure (statische Wände bleiben unberührt) [E]
 	var glow_names := {}
 	for g in glows.get("glows", []):
 		glow_names[String(g.get("name", ""))] = true

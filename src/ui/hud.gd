@@ -112,6 +112,21 @@ func setup(m: Mission) -> void:
 	_optic.add_child(_binoc_mask)
 	_root.add_child(_optic)
 	_root.move_child(_optic, 0)
+	# 0.11.6: Visiersicht im Fahrzeug – Sichtschlitz/Innenraum des Modells ist für 4:3 gebaut; außerhalb schwarz.
+	# 0.11.6: vehicle gunner view – the model's sight/slit is built for 4:3; mask everything outside it.
+	_vsight = Control.new()
+	_vsight.name = "VehicleSightMask"
+	_vsight.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_vsight.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_vsight.visible = false
+	for side in 2:
+		var vb := ColorRect.new()
+		vb.color = Color.BLACK
+		vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_vsight.add_child(vb)
+		_vsight_bars.append(vb)
+	_root.add_child(_vsight)
+	_root.move_child(_vsight, 0)
 	# Original-HUD (gameinterface.4ds) ersetzt Trupp-, Waffen-, Status-Panel und Textkompass
 	if OrigHud.available():
 		orig_hud = OrigHud.new()
@@ -419,6 +434,7 @@ func _process(_delta: float) -> void:
 		_prompt.text = "[%s] Aussteigen" % InputSetup.binding_text("interact")
 	var optic: int = mission.rig.optic_overlay() if mission.rig else (4 if s.using_binoculars else -1)
 	_update_optic(optic)
+	_update_vehicle_sight(mission.rig != null and mission.rig.has_method("vehicle_sight_active") and mission.rig.vehicle_sight_active())
 	_update_breath(optic)
 	# Zoom über Kimme/Korn bzw. Optik: kein Fadenkreuz (die Visierlinie liegt auf der Bildmitte)
 	var zoomed: bool = mission.rig != null and mission.rig.zoomed()
@@ -494,6 +510,38 @@ func _update_optic(t: int) -> void:
 	(_optic_bars[0] as ColorRect).size = Vector2(maxf(x0, 0.0) + 1.0, vp.y) if x0 > 0.5 else Vector2(vp.x, maxf(y0, 0.0) + 1.0)
 	(_optic_bars[1] as ColorRect).position = Vector2(x0 + w - 1.0, 0.0) if x0 > 0.5 else Vector2(0.0, y0 + h - 1.0)
 	(_optic_bars[1] as ColorRect).size = Vector2(maxf(x0, 0.0) + 1.0, vp.y) if x0 > 0.5 else Vector2(vp.x, maxf(y0, 0.0) + 1.0)
+
+
+var _vsight: Control
+var _vsight_bars: Array = []
+
+
+## 4:3-Sichtfeld mittig + Maskenbalken für eine Bildgröße: {"view": Rect2, "bars": [Rect2, Rect2]}.
+## Breiter als 4:3 → Balken links/rechts, schmaler → oben/unten; genau 4:3 → Balken leer.
+static func sight_mask_rects(vp: Vector2) -> Dictionary:
+	var w := minf(vp.x, vp.y * 4.0 / 3.0)
+	var h := minf(vp.y, w * 0.75)
+	var x0 := (vp.x - w) * 0.5
+	var y0 := (vp.y - h) * 0.5
+	var bars: Array = []
+	if x0 > 0.0:
+		bars = [Rect2(0.0, 0.0, x0 + 1.0, vp.y), Rect2(x0 + w - 1.0, 0.0, x0 + 1.0, vp.y)]
+	elif y0 > 0.0:
+		bars = [Rect2(0.0, 0.0, vp.x, y0 + 1.0), Rect2(0.0, y0 + h - 1.0, vp.x, y0 + 1.0)]
+	else:
+		bars = [Rect2(), Rect2()]
+	return {"view": Rect2(x0, y0, w, h), "bars": bars}
+
+
+func _update_vehicle_sight(on: bool) -> void:
+	_vsight.visible = on
+	if not on:
+		return
+	var r := sight_mask_rects(get_viewport().get_visible_rect().size)
+	for i in 2:
+		var b := r["bars"][i] as Rect2
+		(_vsight_bars[i] as ColorRect).position = b.position
+		(_vsight_bars[i] as ColorRect).size = b.size
 
 
 func _update_team() -> void:

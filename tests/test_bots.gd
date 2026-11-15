@@ -29,7 +29,7 @@ func _timeout() -> void:
 
 func _host(map: String, m: int, bots: int) -> Node:
 	Net.local_name = "Host"
-	if not Net.host({"name": "Bots", "map": map, "mode": m, "max_players": 16, "time_limit_min": 0, "score_limit": 0,
+	if not Net.host({"name": "Bots", "map": map, "mode": m, "max_players": 20, "time_limit_min": 0, "score_limit": 0,
 			"respawn_s": 5, "password": "", "port": Net.PORT + 20, "friendly_fire": false, "bots_per_team": bots, "warmup_s": 0}):
 		return null
 	var t0 := Time.get_ticks_msec()
@@ -105,16 +105,20 @@ func _write_metrics() -> void:
 # --- Rollen, Persönlichkeiten, Gruppen, Helden, Erkennung -------------------------------------------
 
 func _phase_roles() -> void:
-	var m = await _host("mp_arena_a1_blizzard", Net.Mode.TEAM_DEATHMATCH, 5)
-	check(m != null, "Server mit 5 KI-Soldaten je Team")
+	# 0.11.1: KI-Soldaten tragen die Klassen-Ausrüstung (MpClasses, Klasse i % COUNT) – 7 je Team = alle Klassen
+	var nb := MpClasses.COUNT
+	var m = await _host("mp_arena_a1_blizzard", Net.Mode.TEAM_DEATHMATCH, nb)
+	check(m != null, "Server mit %d KI-Soldaten je Team (alle Klassen)" % nb)
 	if m == null:
 		return
 	var bots := _bots()
-	check(bots.size() == 10, "10 KI-Soldaten erzeugt", str(bots.size()))
+	check(bots.size() == nb * 2, "%d KI-Soldaten erzeugt" % (nb * 2), str(bots.size()))
 	var roles := {}
 	var personas := {}
+	var classes := {}
 	var role_ok := true
 	var persona_ok := true
+	var heavy_mg := 0
 	for s in bots:
 		var b := _brain(s)
 		if b == null:
@@ -123,20 +127,33 @@ func _phase_roles() -> void:
 		roles[b.role] = int(roles.get(b.role, 0)) + 1
 		personas[b.persona] = int(personas.get(b.persona, 0)) + 1
 		var w: Weapon = s.weapons[0]
-		match b.role:
-			BotBrain.Role.ASSAULT:
-				role_ok = role_ok and w != null and w.data.weight > 8.0             # schweres MG
-			BotBrain.Role.MEDIC:
-				role_ok = role_ok and w != null and s.medkits >= 2
-			BotBrain.Role.AT:
-				role_ok = role_ok and s.weapons[WeaponData.Slot.LAUNCHER] != null and s.weapons[WeaponData.Slot.LAUNCHER].data.action == WeaponData.Action.ROCKET
-			BotBrain.Role.SNIPER:
-				role_ok = role_ok and w != null and w.data.aim_fov <= 30.0          # Zielfernrohr
-			BotBrain.Role.SNEAKER:
-				var p2: Weapon = s.weapons[WeaponData.Slot.SIDEARM]
-				role_ok = role_ok and w != null and (w.data.noise_radius < 20.0 or (p2 != null and p2.data.noise_radius < 20.0))
+		var cls := int(s.get_meta("mp_class_id", -1))
+		classes[cls] = int(classes.get(cls, 0)) + 1
+		var ok := cls >= 0 and b.role == int(MpClasses.BOT_ROLE[cls])
+		if cls >= 0:
+			# Soll-Ausrüstung der Klasse aus MpClasses (gleiche Eingaben wie Net._apply_class)
+			var fig := String(s.get_meta("mp_figure", MpClasses.best_figure(cls)))
+			var inv := MpClasses.build(cls, s.team, Net._current_allowed(), String(Net.settings.get("map", "")), MpClasses.strength_of(fig))
+			var want := int(inv.get("hands", -1))
+			var have := WeaponDB.orig_item_of(w.data.id) if w else -1
+			if cls == MpClasses.SNEAKER and s.team == Soldier.TEAM_AXIS and MpClasses.AXIS_SILENCED.has(want):
+				ok = ok and w != null and String(w.data.id) == String(MpClasses.AXIS_SILENCED[want])
+			else:
+				ok = ok and have == want
+			match cls:
+				MpClasses.MEDIC:
+					ok = ok and s.medkits >= 2
+				MpClasses.HEAVY:
+					ok = ok and BotTraits.weapon_kind(s) == "mg"
+					if ok:
+						heavy_mg += 1
+				MpClasses.SNIPER, MpClasses.SCOUT:
+					ok = ok and w != null and w.data.aim_fov <= 30.0          # Zielfernrohr
+			if not ok:
+				print("KLASSE %s: Soll %d, Ist %s (%d)" % [MpClasses.label(cls), want, w.data.id if w else "-", have])
 		if w == null or w.total_ammo() <= w.data.magazine_size:      # passende Munition (Reservemagazine)
-			role_ok = false
+			ok = false
+		role_ok = role_ok and ok
 		# Persönlichkeit passt zur Waffe
 		var k := BotTraits.weapon_kind(s)
 		match b.persona:
@@ -146,9 +163,9 @@ func _phase_roles() -> void:
 				persona_ok = persona_ok and k == "scoped"
 			BotTraits.Trait.CAMPER:
 				persona_ok = persona_ok and (k in ["silenced", "scoped"] or BotTraits.has_silenced_sidearm(s))
-		if not role_ok:
-			print("ROLLE ", b.role, ": ", w.data.display_name if w else "-", " aim_fov ", w.data.aim_fov if w else 0)
-	check(roles.size() == 5 and role_ok, "Rollen mit Rollenwaffen und Munition (Sturm-MG, Sanitäter, Panzerabwehr, Scharfschütze, Schleicher)", str(roles))
+	check(classes.size() == nb and roles.size() == 5 and role_ok, "Klassen-Ausrüstung je KI-Soldat (MpClasses-Kit, Rolle, Munition)",
+		"Klassen %s, Rollen %s" % [str(classes), str(roles)])
+	check(heavy_mg == 2, "Schwerer Schütze mit schwerem MG je Team", "%d" % heavy_mg)
 	check(personas.size() >= 4 and persona_ok, "Persönlichkeiten passend zur Waffe (Camper, Flankierer, Deckungsfeuer, Scharfschütze)",
 		str(personas.keys().map(func(p): return BotTraits.trait_name(p))))
 	var in_groups := bots.filter(func(s): return _brain(s).group.size() >= 2).size()
@@ -314,8 +331,10 @@ func _dummy(s: Soldier, p: Vector3) -> void:
 
 
 func _phase_tactics() -> void:
-	var m = await _host("mp_arena_a1_blizzard", Net.Mode.TEAM_DEATHMATCH, 4)
-	check(m != null, "Taktik: Server mit 4 KI-Soldaten je Team")
+	# 8 je Team: Klasse 5 (Schwerer Schütze, schweres MG → Deckungsfeuer) ist dabei (MpClasses, Klasse i % COUNT);
+	# Trupps zu je 4 → zweiter Trupp (Klassen 4–7) enthält das MG, erster Trupp (0–3) die Flankierer
+	var m = await _host("mp_arena_a1_blizzard", Net.Mode.TEAM_DEATHMATCH, 8)
+	check(m != null, "Taktik: Server mit 8 KI-Soldaten je Team")
 	if m == null:
 		return
 	_host_off()
@@ -327,22 +346,35 @@ func _phase_tactics() -> void:
 	await _platform(m)
 	var allies: Array = bots.filter(func(s): return s.team == Soldier.TEAM_ALLIED)
 	var axis: Array = bots.filter(func(s): return s.team == Soldier.TEAM_AXIS)
-	var grp: Array = _brain(allies[0]).group.filter(func(b): return is_instance_valid(b))
-	check(grp.size() == 4, "Taktik: Trupp mit 4 KI-Soldaten", str(grp.size()))
-	await _tactic_spacing(grp)
+	# Trupp des Deckungsfeuer-Bots (Schwerer Schütze) und Trupp mit Flankierer
+	var grp_s: Array = []
+	var grp_f: Array = []
+	for s in allies:
+		var g: Array = _brain(s).group.filter(func(b): return is_instance_valid(b))
+		if grp_s.is_empty() and _brain(s).persona == BotTraits.Trait.SUPPORT:
+			grp_s = g
+		if grp_f.is_empty() and _brain(s).persona == BotTraits.Trait.FLANKER:
+			grp_f = g
+	for g in [grp_s, grp_f]:
+		print("TRUPP ", g.map(func(b): return "%s/%s" % [b.soldier.get_meta("mp_class", "?"), BotTraits.trait_name(b.persona)]))
+	check(grp_s.size() == 4, "Taktik: Trupp mit 4 KI-Soldaten (mit Schwerem Schützen)", str(grp_s.size()))
+	if grp_s.is_empty():
+		grp_s = _brain(allies[0]).group.filter(func(b): return is_instance_valid(b))
+	await _tactic_spacing(grp_s)
 	for s in allies:
 		_park(s, 0)
-	await _tactic_support(grp, axis)
+	await _tactic_support(grp_s, axis)
 	for s in allies:
 		_park(s, 0)
 	for s in axis:
 		_park(s, 1)
-	await _tactic_flank(grp, axis)
+	await _tactic_flank(grp_f, axis, _find(grp_s, BotTraits.Trait.SUPPORT))
 	await _leave()
 
 
 ## Abstand: Trupp quert das Gelände (Ziel 70 m entfernt) und hält am Ziel; nächster Kamerad selten < 3 m
 func _tactic_spacing(grp: Array) -> void:
+	seed(4501)       # Zielplatz-/Deckungswahl nutzt randf → seed-stabil (Lauf bleibt physikalisch, nicht bitgenau)
 	var lead: BotBrain = grp[0]
 	for k in grp.size():
 		var b: BotBrain = grp[k]
@@ -392,6 +424,7 @@ func _find(grp: Array, p: int) -> BotBrain:
 ## Deckungsfeuer: MG-Bot feuert in Feuerstößen auf sichtbaren Feind, hält danach die letzte bekannte Lage hinter
 ## einer Mauer nieder und wechselt nach Feuerstößen die Stellung
 func _tactic_support(grp: Array, axis: Array) -> void:
+	seed(4502)
 	var sb := _find(grp, BotTraits.Trait.SUPPORT)
 	check(sb != null, "Trupp hat einen Deckungsfeuer-Bot (MG)")
 	if sb == null:
@@ -450,9 +483,11 @@ func _tactic_support(grp: Array, axis: Array) -> void:
 
 
 ## Flankenweg: Gegner hinter Mauer bekannt; Deckungsfeuer hält nieder, Flankierer rückt seitlich (≥ 8 m) vor
-func _tactic_flank(grp: Array, axis: Array) -> void:
+func _tactic_flank(grp: Array, axis: Array, sb: BotBrain = null) -> void:
+	seed(4503)
 	var fb := _find(grp, BotTraits.Trait.FLANKER)
-	var sb := _find(grp, BotTraits.Trait.SUPPORT)
+	if sb == null:
+		sb = _find(grp, BotTraits.Trait.SUPPORT)
 	check(fb != null, "Trupp hat einen Flankierer")
 	if fb == null:
 		return
@@ -687,6 +722,37 @@ func _phase_combat() -> void:
 	if m == null:
 		return
 	_host_off()
+	seed(4504)
+	# Garantierter Kontaktpunkt: beide Teams je 12 m vor/hinter einer Zone mit freier Sichtlinie, einander zugewandt.
+	# Danach normales Bot-Verhalten (Erkennung, Zielen, Feuern ohne Eingriff).
+	var contact := _combat_contact(m)
+	check(not contact.is_empty(), "Gefechtsrunde: Kontaktpunkt mit Sichtlinie gefunden")
+	if not contact.is_empty():
+		var na := 0
+		var nx := 0
+		for s in _bots():
+			var own: bool = s.team == Soldier.TEAM_ALLIED
+			var base: Vector3 = contact["a"] if own else contact["b"]
+			var lat: Vector3 = contact["lat"] * (2.5 * float(na if own else nx) - 3.75)
+			var p := BotNav.closest(s, base + lat)
+			if p.distance_to(base + lat) > 3.0:
+				p = base
+			s.global_position = p + Vector3.UP * 0.1
+			s.velocity = Vector3.ZERO
+			var to: Vector3 = (contact["b"] if own else contact["a"]) - p
+			s.look_yaw = atan2(-to.x, -to.z)
+			var b := _brain(s)
+			if b:
+				b.goal = Vector3.INF
+			if own:
+				na += 1
+			else:
+				nx += 1
+	var hits := [0]
+	var on_hit := func(v: Node, amount: float, _z, att: Node):
+		if amount > 0.0 and att is Soldier and v is Soldier and att != v and int(att.team) != int(v.team) and att.get_node_or_null("EnemyBrain") is BotBrain:
+			hits[0] += 1
+	Events.soldier_damaged.connect(on_hit)
 	var shots0 := Ballistics.shots_fired
 	var owners0: Array = Net.zone_owner.duplicate()
 	var anchor := {}
@@ -724,12 +790,36 @@ func _phase_combat() -> void:
 	for k in mini(owners0.size(), Net.zone_owner.size()):
 		if int(owners0[k]) != int(Net.zone_owner[k]):
 			changed += 1
+	Events.soldier_damaged.disconnect(on_hit)
 	var frac := float(near) / maxf(samples, 1)
-	var line := "Gefecht %s (%.0f s, 4 gegen 4): %d Schüsse, %d Tote, Zonen gewechselt %d, Punkte %.1f : %.1f, längstes Festhängen %.1f s (%s), Abstand < 3 m %.1f %%" % [
-		map, dur, Ballistics.shots_fired - shots0, deaths, changed, Net.team_score[0], Net.team_score[1], max_stuck, worst, frac * 100.0]
+	var line := "Gefecht %s (%.0f s, 4 gegen 4): %d Schüsse, %d Treffer, %d Tote, Zonen gewechselt %d, Punkte %.1f : %.1f, längstes Festhängen %.1f s (%s), Abstand < 3 m %.1f %%" % [
+		map, dur, Ballistics.shots_fired - shots0, hits[0], deaths, changed, Net.team_score[0], Net.team_score[1], max_stuck, worst, frac * 100.0]
 	print("NAVMESS ", line)
 	metrics.append(line)
-	check(Ballistics.shots_fired > shots0 and changed >= 1, "Gefechtsrunde: Gefecht und Zonenwechsel", "%d Schüsse, %d Zonen" % [Ballistics.shots_fired - shots0, changed])
+	check(Ballistics.shots_fired > shots0 and hits[0] >= 1, "Gefechtsrunde: Bot-gegen-Bot-Gefecht (Schüsse und Treffer)",
+		"%d Schüsse, %d Treffer" % [Ballistics.shots_fired - shots0, hits[0]])
+	check(changed >= 1, "Gefechtsrunde: Zonenwechsel", "%d Zonen" % changed)
 	check(max_stuck <= STUCK_LIMIT, "Gefechtsrunde: kein KI-Soldat > %.0f s festgehängt" % STUCK_LIMIT, "%.1f s %s" % [max_stuck, worst])
 	check(frac <= 0.15, "Gefechtsrunde: KI-Soldaten kleben nicht aneinander (< 3 m höchstens 15 %)", "%.1f %%" % (frac * 100.0))
 	await _leave()
+
+
+## Kontaktpunkt: Zonenmitte, 16 Richtungen; beide Endpunkte (je 12 m) auf dem Netz, freie Sichtlinie in Augenhöhe
+func _combat_contact(m: Node) -> Dictionary:
+	var ref: Soldier = _bots()[0]
+	var space: PhysicsDirectSpaceState3D = ref.get_world_3d().direct_space_state
+	for z in m.mp_zones():
+		var c: Vector3 = (z["xf"] as Transform3D).origin
+		for k in 16:
+			var ang := TAU * k / 16.0
+			var d := Vector3(cos(ang), 0, sin(ang))
+			var a := BotNav.closest(ref, c - d * 12.0)
+			var b := BotNav.closest(ref, c + d * 12.0)
+			if not a.is_finite() or not b.is_finite() or BotNav.flat(a, c - d * 12.0) > 2.0 or BotNav.flat(b, c + d * 12.0) > 2.0 \
+					or absf(a.y - b.y) > 3.0:
+				continue
+			var q := PhysicsRayQueryParameters3D.create(a + Vector3.UP * 1.5, b + Vector3.UP * 1.5, 1)
+			if not space.intersect_ray(q).is_empty():
+				continue
+			return {"a": a, "b": b, "lat": Vector3(-d.z, 0, d.x)}
+	return {}

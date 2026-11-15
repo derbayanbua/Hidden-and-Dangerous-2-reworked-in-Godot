@@ -274,6 +274,10 @@ func _round(r: int) -> bool:
 		_capture_candidates()
 		if not leise:
 			_kill_enemies(true)
+		else:
+			# B-032d: auch „leise“ schaltet Gegner aus, deren Skript selbst ein Ziel scheitern lässt (Signal an einen
+			# OnSignal-Handler mit SetObjectiveStatus(n,3), z. B. ARCTIC4 Marine_Officer_1 → OBJ 7 „U-Boot taucht“)
+			_kill_fail_senders()
 		if await _wait(2.0):
 			return true
 	for p in _trigger_points():
@@ -720,6 +724,59 @@ func _protected_names() -> Dictionary:
 	return _protected
 
 
+## B-032d: Gegner, deren eigenes Skript SendSignal(<Frame>, n) an ein Skript schickt, dessen OnSignal(n) ein Ziel
+## scheitern lässt (SetObjectiveStatus(k, 3) im Handler, ohne Kommentar)
+func _fail_senders() -> Array:
+	var fail_re := RegEx.create_from_string("setobjectivestatus\\s*\\(\\s*\\d+\\s*,\\s*3\\s*\\)")
+	var sig_re := RegEx.create_from_string("^\\s*onsignal\\s*\\(\\s*(\\d+)\\s*\\)")
+	var hdr_re := RegEx.create_from_string("^\\s*(whenever|onsignal|ondeath|onalarm|onalarmdone|onuse|onhit|label)\\b")
+	# Frame-Name (klein) → fehlschlagende Signalnummern
+	var fail_sig := {}
+	for vm in rt.vms:
+		if not is_instance_valid(vm.me):
+			continue
+		var lines := _src(vm.name).split("\n")
+		var cur := -1
+		for ln in lines:
+			var code := ln.split("//")[0]
+			var sm := sig_re.search(code)
+			if sm:
+				cur = int(sm.get_string(1))
+			elif hdr_re.search(code):
+				cur = -1
+			if cur >= 0 and fail_re.search(code):
+				var k := String(vm.me.name).to_lower()
+				if not fail_sig.has(k):
+					fail_sig[k] = {}
+				fail_sig[k][cur] = true
+	var out: Array = []
+	if fail_sig.is_empty():
+		return out
+	var ff_re := RegEx.create_from_string("frm_findframe\\s*\\(\\s*(\\w+)\\s*,\\s*\"([^\"]+)\"")
+	var send_re := RegEx.create_from_string("sendsignal\\s*\\(\\s*(\\w+)\\s*,\\s*(\\d+)\\s*\\)")
+	for vm in rt.vms:
+		if not (is_instance_valid(vm.me) and vm.me is Soldier and m.enemies.has(vm.me)):
+			continue
+		var src := _src(vm.name)
+		var frames := {}
+		for mt in ff_re.search_all(src):
+			frames[mt.get_string(1)] = mt.get_string(2).to_lower()
+		for ln in src.split("\n"):
+			for mt in send_re.search_all(ln.split("//")[0]):
+				var tgt := String(frames.get(mt.get_string(1), ""))
+				if fail_sig.has(tgt) and fail_sig[tgt].has(int(mt.get_string(2))) and not out.has(vm.me):
+					out.append(vm.me)
+	return out
+
+
+func _kill_fail_senders() -> void:
+	var lead := _lead()
+	for e in _fail_senders():
+		if is_instance_valid(e) and e.alive:
+			e.die(lead)
+			print("LOESER Fehlschlag-Auslöser %s ausgeschaltet (leise)" % e.name)
+
+
 func _kill_enemies(spare_protected := false) -> void:
 	var lead := _lead()
 	var n := 0
@@ -734,6 +791,19 @@ func _kill_enemies(spare_protected := false) -> void:
 		if d.has_method("on_bullet_hit") and d.get("health") != null and float(d.health) > 0.0:
 			d.on_bullet_hit(9999.0, lead)
 	print("LOESER %d Gegner ausgeschaltet" % n)
+
+
+## true, wenn ein lebender Truppsoldat auf einem Kollisionskörper unterhalb von obj steht (Strahl 2 m abwärts)
+func _squad_stands_on(obj: Node) -> bool:
+	var space := m.get_world_3d().direct_space_state
+	for s in m.squad.members:
+		if not is_instance_valid(s) or not s.alive:
+			continue
+		var q := PhysicsRayQueryParameters3D.create(s.global_position + Vector3.UP * 0.3, s.global_position + Vector3.DOWN * 2.0, 1)
+		var h := space.intersect_ray(q)
+		if not h.is_empty() and h.collider is Node and (obj == h.collider or obj.is_ancestor_of(h.collider)):
+			return true
+	return false
 
 
 ## Skriptziele mit OnDeath (Fahrzeuge, zerstörbare Objekte, Kisten) zerstören
@@ -763,7 +833,10 @@ func _destroy_script_targets() -> void:
 			n += 1
 		elif own.has_meta("orig_ctl"):
 			var ctl = own.get_meta("orig_ctl")
-			if ctl is OrigInteractive.OrigDestructible and not ctl.destroyed:
+			if ctl is OrigInteractive.OrigDestructible and not ctl.destroyed and _squad_stands_on(own):
+				# B-032d: ARCTIC4 ulomek_* (Eisschollen) – Zerstören ließ den Trupp in die Außenzone (0x2000) fallen
+				print("LOESER schont ", own.name, " (Trupp steht darauf)")
+			elif ctl is OrigInteractive.OrigDestructible and not ctl.destroyed:
 				ctl.destroy()
 				print("LOESER zerstört ", own.name)
 				n += 1

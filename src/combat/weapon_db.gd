@@ -221,6 +221,7 @@ const EXTRA_ITEMS := {PANZERFAUST_AMMO: {"item": PANZERFAUST_AMMO, "id": PANZERF
 	901: {"item": 901, "id": 901, "name": "Überspritze", "kind": "equipment", "weight_kg": 0.3, "size_class": 1,
 	"space_units": 1, "icon": "ii_aid", "model": "l_medkit", "text_id": -1, "team_flag": 2, "u70": 9, "behaviours": []}}
 const ORIG_PISTOLS := [0, 1, 2, 3, 5, 260, 261]
+const ORIG_SHOTGUNS := [23]       ## Side by Side (items.sav 23)
 ## Granaten/Handwaffen, die ein Soldat tragen kann (Bordwaffen, Geschütze, Flak u. a. nicht)
 const ORIG_HANDHELD_MAX_KG := 15.0
 static var _orig_table: Dictionary = {}
@@ -257,7 +258,9 @@ static func _apply_orig_spread() -> void:
 		if deg < 0.0:
 			continue
 		w.spread_aim = deg
-		w.spread_hip = maxf(w.spread_hip, deg)
+		# 0.11.6: Original kennt keinen eigenen Hüftzweig (0x5433B0 → 0x545140) [B] – Hüftstreuung = Originalstreuung
+		# 0.11.6: the original has no separate hip branch [B] – hip spread = original spread
+		w.spread_hip = deg
 
 
 ## 0.11.2 Rückstoß hd2.exe 0x5454D0 [B]: Faktor nach Waffenart (Getter vtable+0x10 der Gegenstandsdefinition):
@@ -318,7 +321,11 @@ static func from_orig(item: int, mounted := false) -> WeaponData:
 		muzzle_velocity = float(o.get("muzzle_velocity", 400.0)), damage = float(o.get("damage", 300.0)) / 10.0,
 		# items.sav Feuerwaffe +0x34 Abfallbeginn (m), +0x38 Abfall je m (zotti) [B 0x44B3B0]
 		falloff_start = float(o.get("dist_param", 50.0)), falloff_per_m = float(o.get("recoil_spread", 0.0)) / 10.0,
-		spread_hip = maxf(2.8 if pistol else (4.5 if heavy else 3.0), aim_deg if aim_deg >= 0.0 else 0.0),
+		# 0.11.6: Flinte (Side by Side 23, items.sav dw15 0,05): Original ohne Hüft-/Zielzweig (0x5433B0 → 0x545140) und mit
+		# EINEM Geschoss (0x7D4FD0 Typ 3 → 0x451100, keine Schrotschleife) [B] – die geschätzte Hüftstreuung 3° [E] ließ sie
+		# ungezoomt ab ~10 m vorbeischießen; Hüftstreuung = Originalstreuung
+		# 0.11.6: für alle Waffen mit Originalwert dasselbe (kein Hüftzweig im Original) [B]; ohne Wert Schätzung [E]
+		spread_hip = aim_deg if aim_deg >= 0.0 else (0.0 if ORIG_SHOTGUNS.has(item) else (2.8 if pistol else (4.5 if heavy else 3.0))),
 		spread_aim = aim_deg if aim_deg >= 0.0 else (0.7 if pistol else (0.08 if act == WeaponData.Action.BOLT else 0.5)),
 		recoil_pitch = 2.0 if pistol else (1.3 if act == WeaponData.Action.AUTO else 3.2), recoil_yaw = 0.6,
 		spread_per_shot = 0.3, aim_fov = 60.0 if pistol else (30.0 if String(o.get("name", "")).contains("optic") else 45.0),

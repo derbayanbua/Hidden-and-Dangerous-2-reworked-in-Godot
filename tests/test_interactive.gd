@@ -49,6 +49,44 @@ func _run() -> void:
 	if ladder:
 		s.global_position = ladder.bottom + Vector3(0, 0.1, 0)
 		await frames(3)
+		# Kein automatischer Einstieg: Springen/Aufstehen (Spieler) und Klettern-Taste nehmen die Leiter nicht
+		await seconds(0.5)
+		s.jump_or_climb(false)
+		check(not s.is_on_ladder(), "Leiter: Springen/Leertaste steigt nicht ein")
+		await seconds(1.2)
+		s.global_position = ladder.bottom + Vector3(0, 0.1, 0)
+		await frames(3)
+		s.climb_only()
+		check(not s.is_on_ladder(), "Leiter: Klettern-Taste steigt nicht ein")
+		await seconds(1.2)
+		s.global_position = ladder.bottom + Vector3(0, 0.1, 0)
+		s.move_input = Vector3.ZERO
+		await seconds(1.0)
+		check(not s.is_on_ladder() and absf(s.global_position.y - ladder.bottom.y) < 0.6, "Leiter: Stehen/Laufen an der Leiter steigt nicht ein")
+		# Einstieg per Benutzen-Taste (Aktion „interact“ über den PlayerController)
+		var pc: PlayerController = m.controller
+		var y_use := s.global_position.y
+		if pc and pc.active == s:
+			pc.input_enabled = true
+			pc.interact_target = ladder
+			var ev := InputEventAction.new()
+			ev.action = "interact"
+			ev.pressed = true
+			pc._unhandled_input(ev)
+			check(s.is_on_ladder(), "Leiter: Benutzen-Taste steigt ein", "ui_blocking=%s kann=%s klettert=%s" % [pc.ui_blocking(),
+				ladder.can_interact(s), s.is_climbing()])
+			await seconds(0.8)
+			var ev2 := InputEventAction.new()
+			ev2.action = "interact"
+			ev2.pressed = true
+			pc._unhandled_input(ev2)
+			await seconds(2.5)
+			check(not s.is_climbing() and absf(s.global_position.y - y_use) < 0.6, "Leiter: erneutes Benutzen steigt ab",
+				"%.1f -> %.1f" % [y_use, s.global_position.y])
+		else:
+			check(false, "PlayerController mit aktivem Soldaten gefunden")
+		s.global_position = ladder.bottom + Vector3(0, 0.1, 0)
+		await frames(3)
 		var y0 := s.global_position.y
 		ladder.climb(s)
 		check(s.is_climbing(), "Leiter: Klettern beginnt")

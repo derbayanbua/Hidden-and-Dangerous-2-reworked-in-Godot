@@ -9,6 +9,7 @@ extends CanvasLayer
 ##  - Zuschauerkamera: Spieler folgen (LMT/RMT wechselt) oder frei (Leertaste umschalten, WASD + Maus)
 ##  - Spawnzonen-Karte (T2525/2528, Taste M bzw. Pausenmenü): eigene Zone anklicken = Spawnzone festlegen
 ##  - Voice-Chat-Anzeige (eigenes Sprechen / wer spricht)
+##  - 0.11.6 Minikarte: eigene Lage, Verbündete, kurz feuernde Gegner ohne Schalldämpfer (src/ui/mp_minimap.gd)
 
 const CHAT_LINES := 6
 const CHAT_SHOW_S := 10.0
@@ -32,6 +33,7 @@ var _chat_t := 0.0
 var _last_chat_n := 0
 var feedback                       ## MpFeedback (src/ui/mp_feedback.gd)
 var kill_cam                       ## KillCam (src/ui/kill_cam.gd)
+var minimap                        ## 0.11.6 Minikarte (src/ui/mp_minimap.gd)
 
 
 func _ready() -> void:
@@ -69,6 +71,9 @@ func _ready() -> void:
 	kill_cam = preload("res://src/ui/kill_cam.gd").new()           # Kill-Cam nach dem eigenen Tod (src/ui/kill_cam.gd)
 	kill_cam.name = "KillCam"
 	root.add_child(kill_cam)
+	minimap = preload("res://src/ui/mp_minimap.gd").new()          # 0.11.6 Minikarte (src/ui/mp_minimap.gd)
+	minimap.name = "Minimap"
+	root.add_child(minimap)
 	root.resized.connect(_layout_graphics)
 	_layout_graphics.call_deferred()
 	_build_promotion(root)

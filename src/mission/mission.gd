@@ -266,7 +266,8 @@ func _bake_navigation() -> void:
 	nm.cell_size = 0.2
 	nm.cell_height = 0.2
 	nm.geometry_parsed_geometry_type = NavigationMesh.PARSED_GEOMETRY_STATIC_COLLIDERS
-	nm.geometry_collision_mask = 1 | (1 << 4) | LevelBuilder.BORDER_LAYER   # Welt + Zäune + Kartengrenze (af1_finale2)
+	# Welt + Zäune + Kartengrenze (af1_finale2) + reine Netzflächen (B-010c, OrigLevel WALK_PATCHES „navramp“)
+	nm.geometry_collision_mask = 1 | (1 << 4) | LevelBuilder.BORDER_LAYER | LevelBuilder.NAV_ONLY_LAYER
 	nm.region_min_size = 4.0
 	nm.filter_low_hanging_obstacles = true
 	nm.filter_ledge_spans = true
@@ -551,11 +552,13 @@ func _nav_tile_done(reg: NavigationRegion3D, tile: NavigationMesh) -> void:
 			if not is_inside_tree():
 				return
 		_add_ladder_links()
-		if not ladder_links.is_empty() or not bridge_links.is_empty():
+		var snapped_links := _snap_stair_links()
+		if not ladder_links.is_empty() or not bridge_links.is_empty() or not snapped_links.is_empty():
 			# Verbindungen wirken erst nach einem vollständigen (asynchronen) Abgleich der Navigationskarte – zwei
 			# Physikschritte reichten nicht (ARCTIC1: nur 26 von 271 Links begehbar) → warten, bis ein Link-Pfad
 			# über die letzte Verbindung führt (höchstens 30 s)
 			var links: Array[NavigationLink3D] = []
+			links.append_array(snapped_links)   # B-010c: Prüflink bleibt wie bisher der letzte Brücken-/Leiterlink
 			links.append_array(bridge_links)
 			links.append_array(ladder_links)
 			var probe_l: NavigationLink3D = links[-1]
@@ -812,6 +815,101 @@ static func _uf_union(uf: Array, a: int, b: int) -> void:
 ## Türme/Dächer mit Spawnpunkten (z. B. ARCTIC1_MP) im Netz erreichbar sind. Die KI erkennt die Verbindung über
 ## NavigationAgent3D.link_reached; Metadaten „ladder“ = Leiter-Knoten am Fuß (Benutzen klettert hinauf/hinunter).
 var ladder_links: Array[NavigationLink3D] = []
+
+
+## B-010c: Treppen-/Rampen-Links (OrigLevel WALK_PATCHES, Meta „stair“) mit einem Ende ohne Netz (weiter als der
+## Link-Verbindungsradius der Karte) an das
+## nächste Polygon desselben Podests heften (≤ 3,5 m waagerecht, −0,3…+0,7 m Höhe, freie Sicht in 1 m Höhe).
+## ARCTIC2 T1 (Scherentreppe): Recast legt die Podeste nur als kleine Polygone ~0,4 m über dem Boden an, die Link-Enden
+## 0,6 m hinter den Rampen fanden darum kein Polygon (LINKCHECK 4 Links tot) → Startinsel Commando1 abgetrennt.
+## Rückgabe: geänderte Links (für den Abgleich vor nav_ready). `--nav_link_snap=0` = alter Stand.
+func _snap_stair_links() -> Array[NavigationLink3D]:
+	var out: Array[NavigationLink3D] = []
+	if Game.cli.get("nav_link_snap", "1") == "0" or static_root == null:
+		return out
+	var map := nav_region.get_navigation_map()
+	var space := get_world_3d().direct_space_state
+	var link_r := NavigationServer3D.map_get_link_connection_radius(map)
+	for n in static_root.find_children("*", "NavigationLink3D", true, false):
+		var lk := n as NavigationLink3D
+		if not lk.has_meta("stair"):
+			continue
+		var changed := false
+		for end in 2:
+			var e: Vector3 = lk.global_transform * (lk.start_position if end == 0 else lk.end_position)
+			# angebunden ist ein Link-Ende bis zum Verbindungsradius der Karte (Standard 1 m) – dann nicht verschieben
+			if NavigationServer3D.map_get_closest_point(map, e).distance_to(e) <= link_r:
+				continue
+			var best := Vector3.INF
+			var best_d := INF
+			var r := -3.5
+			while r <= 3.5:
+				var s := -3.5
+				while s <= 3.5:
+					var c := NavigationServer3D.map_get_closest_point(map, e + Vector3(r, 0.35, s))
+					var dh := Vector2(c.x - e.x, c.z - e.z).length()
+					if c.y - e.y > -0.3 and c.y - e.y < 0.7 and dh <= 3.5 and dh < best_d:
+						var q := PhysicsRayQueryParameters3D.create(e + Vector3.UP, c + Vector3.UP, 1)
+						if space.intersect_ray(q).is_empty():
+							best = c
+							best_d = dh
+					s += 0.5
+				r += 0.5
+			if best.is_finite():
+				var loc := lk.global_transform.affine_inverse() * best
+				if end == 0:
+					lk.start_position = loc
+				else:
+					lk.end_position = loc
+				changed = true
+				_join_nearby(map, space, e, lk.get_parent(), out)
+		for end in 2:
+			# Rampenenden berühren das Podest/den Boden oft nur in einem Eckpunkt (eigene Recast-Insel, keine Inselbrücke;
+			# ARCTIC2 x_schody13: Link verband Rampe mit Rampe) → nahe Polygone gleicher Höhe ohne Weg dorthin verbinden
+			_join_nearby(map, space, lk.global_transform * (lk.start_position if end == 0 else lk.end_position),
+				lk.get_parent(), out)
+		for re: Vector3 in lk.get_meta("ramp_ends", []):
+			_join_nearby(map, space, lk.global_transform * re, lk.get_parent(), out)
+		if changed:
+			out.append(lk)
+	if not out.is_empty():
+		var joins := out.filter(func(l: NavigationLink3D) -> bool: return l.has_meta("stair_join")).size()
+		print("NAV: %d Treppen-Links an Podest-Polygone geheftet, %d Anschluss-Links" % [out.size() - joins, joins])
+	return out
+
+
+## B-010c: Polygone im Umkreis 0,4–1,2 m um p (Höhe ±0,45 m zum Polygon bei p), zu denen vom Polygon bei p kein Weg
+## führt, mit einem kurzen Link „StairJoin“ verbinden (freie Sicht in 1,5 m Höhe, je Nachbarinsel höchstens einer).
+func _join_nearby(map: RID, space: PhysicsDirectSpaceState3D, p: Vector3, parent: Node, out: Array[NavigationLink3D]) -> void:
+	var c0 := NavigationServer3D.map_get_closest_point(map, p)
+	if c0.distance_to(p) > 1.0:
+		return
+	var added: Array[Vector3] = []
+	for rad: float in [0.4, 0.8, 1.2]:
+		for k in 12:
+			var ang := k * TAU / 12.0
+			var c := NavigationServer3D.map_get_closest_point(map, c0 + Vector3(cos(ang) * rad, 0.0, sin(ang) * rad))
+			if absf(c.y - c0.y) > 0.45 or c.distance_to(c0) < 0.3 or Vector2(c.x - c0.x, c.z - c0.z).length() > 1.5:
+				continue
+			if added.any(func(v: Vector3) -> bool: return v.distance_to(c) < 1.0):
+				continue
+			var pth := NavigationServer3D.map_get_path(map, c0, c, true)
+			if pth.size() > 0 and pth[pth.size() - 1].distance_to(c) < 0.3:
+				continue
+			# freie Sicht in 1,5 m Höhe (über Geländern ~1 m; Wände/Türsturz blockieren weiter)
+			if not space.intersect_ray(PhysicsRayQueryParameters3D.create(c0 + Vector3.UP * 1.5, c + Vector3.UP * 1.5, 1)).is_empty():
+				continue
+			var j := NavigationLink3D.new()
+			j.name = "StairJoin"
+			j.bidirectional = true
+			j.set_meta("stair", true)
+			j.set_meta("stair_join", true)
+			parent.add_child(j)
+			j.global_transform = Transform3D.IDENTITY
+			j.start_position = c0
+			j.end_position = c
+			added.append(c)
+			out.append(j)
 
 
 func _add_ladder_links() -> void:

@@ -95,7 +95,12 @@ func _run() -> void:
 			me.extra_spread = -1000.0
 			me.has_aim_point = true
 			me.aim_point = mine.hit_area.global_position + Vector3.UP * 0.07
+			# 0.11.6: in der 1. Person zielt der Schuss aufs Fadenkreuz der Kamera; der Test setzt den Zielpunkt
+			# direkt, daher Kamera-Zielung fuer diesen Schuss abkoppeln (Augpunkt wie 3. Person)
+			var rig: Node = me.aim_rig
+			me.aim_rig = null
 			me._fire_shot(w)
+			me.aim_rig = rig
 			me.has_aim_point = false
 			me.extra_spread = 0.0
 			shots += 1

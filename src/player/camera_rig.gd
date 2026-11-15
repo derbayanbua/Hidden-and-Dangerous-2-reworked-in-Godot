@@ -144,6 +144,11 @@ func _vehicle_gun_view() -> bool:
 	return v != null and v.get("turrets") != null and (v.turrets as Dictionary).has(target.seat_index)
 
 
+## 0.11.6: Visiersicht einer Bordwaffe aktiv (HUD maskiert außerhalb 4:3). / Vehicle gunner view active.
+func vehicle_sight_active() -> bool:
+	return is_instance_valid(target) and target.alive and target.vehicle != null and not fpv_active and _vehicle_gun_view()
+
+
 func toggle_mode() -> void:
 	# 0.11.4: im Panzer/an Bordwaffen schaltet V zwischen Innen-/Visiersicht und Verfolgerkamera.
 	# 0.11.4: in tanks / vehicle guns V toggles between gunner view and chase camera.
@@ -357,7 +362,8 @@ func _on_weapon_changed(w: Weapon) -> void:
 	_vm_info = {}
 	_vm_clip = ""
 	_vm_hold = false
-	_vm_fix = Vector3.INF
+	_vm_fix = Transform3D()
+	_vm_fixed = false
 	_vm_queue.clear()
 	_vm_key = ""
 	_vm_tool = ""
@@ -582,30 +588,69 @@ func _vm_hold_aim() -> void:
 		_vm_clip = ""
 
 
-var _vm_fix := Vector3.INF
+var _vm_fix := Transform3D()       ## [D] Pistolen-Zoom: Lage der FPV-Waffe mit Visierlinie auf der Blickachse
+var _vm_fixed := false
 
 
-## Versatz, der die Oberkante der FPV-Waffe (vorn, Mitte) auf die Blickachse legt (Viewmodel-Raum, unskaliert).
-func _measure_sight() -> Vector3:
+## Visierlinie der FPV-Waffe im Viewmodel-Raum (unskaliert, Blick −Z): {"sight": Korn = oberster Punkt der vorderen 7 cm
+## der sichtbaren Waffenmeshes, "axis": Laufachse aus den Original-Dummies shdum → blsdum}; leer ohne Modell.
+## pre: zusätzliche Lage (Viewmodel-Raum), die vor der Messung auf die Punkte angewendet wird.
+func fpv_sight_line(pre := Transform3D()) -> Dictionary:
+	if not is_instance_valid(_vm_weapon):
+		return {}
 	var gun := _vm_weapon.find_child("fpv_weapon", true, false) as Node3D
-	if gun == null:
-		return Vector3.ZERO
-	var inv := _viewmodel.global_transform.affine_inverse()
-	var mn := Vector3.INF
-	var mx := -Vector3.INF
+	var a := _vm_weapon.find_child("shdum", true, false) as Node3D
+	var b := _vm_weapon.find_child("blsdum", true, false) as Node3D
+	if gun == null or a == null or b == null:
+		return {}
+	var inv := pre * _viewmodel.global_transform.affine_inverse()
+	var axis := (inv * b.global_position - inv * a.global_position).normalized()
+	var pts: Array[Vector3] = []
 	for mi in [gun] + gun.find_children("*", "MeshInstance3D", true, false):
-		if not (mi is MeshInstance3D):
+		# 0.11.6: ausgeblendete Teile (Mündungsfeuer „flash“) verfälschten die alte Hüllkörper-Messung
+		if not (mi is MeshInstance3D) or (mi as Node).name == "flash" or not (mi as MeshInstance3D).visible:
 			continue
-		var ab: AABB = (mi as MeshInstance3D).get_aabb()
+		var mesh := (mi as MeshInstance3D).mesh
+		if mesh == null:
+			continue
 		var xf: Transform3D = inv * (mi as MeshInstance3D).global_transform
-		for i in 8:
-			var p: Vector3 = xf * ab.get_endpoint(i)
-			mn = mn.min(p)
-			mx = mx.max(p)
-	if not mn.is_finite():
-		return Vector3.ZERO
-	var cur := _vm_weapon.position
-	return -Vector3((mn.x + mx.x) * 0.5 - cur.x, mx.y - cur.y, 0.0)
+		for si in mesh.get_surface_count():
+			for v in (mesh.surface_get_arrays(si)[Mesh.ARRAY_VERTEX] as PackedVector3Array):
+				pts.append(xf * v)
+	if pts.is_empty():
+		return {}
+	var zmin := INF
+	for p in pts:
+		zmin = minf(zmin, p.z)
+	var top := -INF
+	for p in pts:
+		if p.z < zmin + 0.07:
+			top = maxf(top, p.y)
+	var s := Vector3.ZERO
+	var n := 0
+	for p in pts:
+		if p.z < zmin + 0.07 and p.y > top - 0.003:
+			s += p
+			n += 1
+	s /= float(n)
+	s.y = top
+	return {"sight": s, "axis": axis}
+
+
+## [D] Pistolen (Original ohne Zoom/Visierhaltung): Lage, die die Laufachse parallel zur Blickachse dreht (um das Korn)
+## und das Korn auf die Blickachse schiebt (0.11.6; vorher nur Versatz aus dem Hüllkörper inkl. Mündungsfeuer → Korn
+## bis 400 px neben der Bildmitte, Colt 11° schräg).
+func _measure_sight() -> Transform3D:
+	var cur := _vm_weapon.transform
+	var d0 := fpv_sight_line()
+	if d0.is_empty():
+		return cur
+	var s0: Vector3 = d0["sight"]
+	var rot := Transform3D(Basis(Quaternion(d0["axis"], Vector3.FORWARD)), Vector3.ZERO)
+	rot = Transform3D(Basis(), s0) * rot * Transform3D(Basis(), -s0)
+	var d1 := fpv_sight_line(rot)
+	var s1: Vector3 = d1.get("sight", s0)
+	return Transform3D(Basis(), Vector3(-s1.x, -s1.y, 0.0)) * rot * cur
 
 
 func _vm_has(action: String) -> bool:
@@ -747,16 +792,20 @@ func _update_viewmodel(delta: float) -> void:
 		_vm_kick = maxf(_vm_kick - delta * 9.0, 0.0)
 		# [D] (Pistolen-Zoom): die Original-Zielhaltung liegt tiefer – Visierlinie (Oberkante
 		# der Waffe vorn) einmalig vermessen und auf die Bildmitte schieben
-		var fix := Vector3.ZERO
+		var fix := Transform3D()
 		if bool(_zoom_info().get("vorgabe", false)) and _vm_aim():
-			if _vm_fix == Vector3.INF and _vm_hold and not _vm_anim.is_playing():
+			# 0.11.6: Pistolen-FPV ohne Zielclip (P08, Enfield .38, Typ 94, Tokarew) messen in der Ruhehaltung – vorher nie
+			if not _vm_fixed and (_vm_hold or not _vm_has("aim")) and _zoom_t >= 1.0 and not _vm_anim.is_playing():
 				_vm_fix = _measure_sight()
-			if _vm_fix != Vector3.INF:
-				fix = _vm_fix * _zoom_t
+				_vm_fixed = true
+			if _vm_fixed:
+				fix = Transform3D().interpolate_with(_vm_fix, _zoom_t)
+		elif _zoom_t <= 0.0:
+			_vm_fixed = false      # je Zielvorgang neu messen (Haltungswechsel/Ruheclip ändern die Ausgangslage)
 		if FPV_RELOAD_OFFSET.has(_vm_key) and _vm_reloading():
-			fix += FPV_RELOAD_OFFSET[_vm_key]
-		fix += Vector3(0.0, -0.5, 0.6) * _wall_retract(delta)
-		_vm_weapon.position = _vm_weapon.position.lerp(fix, clampf(delta * 12.0, 0.0, 1.0))
+			fix.origin += FPV_RELOAD_OFFSET[_vm_key]
+		fix.origin += Vector3(0.0, -0.5, 0.6) * _wall_retract(delta)
+		_vm_weapon.transform = _vm_weapon.transform.interpolate_with(fix, clampf(delta * 12.0, 0.0, 1.0))
 		return
 	if _vm_tool != "":
 		# Hilfsmittel ohne FPV-Modell: ruhig vor der Kamera mit leichtem Wippen

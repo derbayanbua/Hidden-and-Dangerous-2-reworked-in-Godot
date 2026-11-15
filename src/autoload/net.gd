@@ -425,6 +425,7 @@ func _setup_done() -> void:
 func _server_setup_done(id: int) -> void:
 	if not players.has(id) or not in_setup(id):
 		return
+	print("NET: Spieler %d SPIELER-SETUP bestätigt" % id)
 	players[id]["in_setup"] = false
 	_players.rpc(players)
 	var s: Soldier = _soldiers.get(id)
@@ -534,7 +535,8 @@ func vehicles_allowed() -> bool:
 	return not is_online or bool(rule("allow_vehicles"))
 
 
-## Fallschaden (Server-Regel fallingdmg; nur Mehrspieler). Höhe des Schadens = Annahme (Soldier).
+## Fallschaden (Server-Regel fallingdmg; nur Mehrspieler). Betrag = Soldier.fall_damage_for (hd2.exe 0x770C30 [B]);
+## Client meldet über _fall_req (seit DH2-LAN-4 vorhanden), der Server wendet an (Kill-Feed-Ursache „fall“).
 func fall_damage(s: Soldier, amount: float) -> void:
 	if not is_online or not bool(rule("falling_damage")) or amount <= 0.0:
 		return
@@ -553,7 +555,7 @@ func _fall_req(amount: float) -> void:
 	var s: Soldier = _soldiers.get(multiplayer.get_remote_sender_id())
 	if multiplayer.is_server() and is_instance_valid(s) and s.alive and bool(rule("falling_damage")):
 		hit_source = "fall"
-		s.apply_hit(clampf(amount, 0.0, 500.0), &"legs", s, Vector3.DOWN)
+		s.apply_hit(clampf(amount, 0.0, Soldier.FALL_ZOTTI_MAX * Soldier.FALL_LP_PER_ZOTTI), &"legs", s, Vector3.DOWN)
 		hit_source = ""
 
 
@@ -1636,6 +1638,7 @@ func start_from_console() -> String:
 	var mm = Game.MISSIONS.get(String(c["map"]), {}).get("mp_mode")
 	if mm != null:
 		c["mode"] = int(mm)
+		restyle_rules(c, m, int(mm))       # 0.11.6: erste Karte mit festem Stil → deren Stil-Standards
 	if not host(c):
 		return last_error
 	return "Creating H&D2 Server (%s, Port %d)" % [String(c["map"]), int(c["port"])]
@@ -1862,14 +1865,29 @@ func compass_mates(me: Soldier) -> Array:
 	return out
 
 
+## 0.11.6: Server-Diagnose, warum ein Spieler nicht gespawnt wird (je Peer nur bei geändertem Grund)
+var spawn_block_log := {}     ## Peer-ID -> letzter Grund ("" = gespawnt)
+
+
+func _spawn_blocked(id: int, why: String) -> void:
+	if id > 0 and String(spawn_block_log.get(id, "")) != why:
+		spawn_block_log[id] = why
+		print("NET: Spieler %d nicht gespawnt: %s" % [id, why])
+
+
 func _server_spawn(id: int) -> void:
 	var m = Game.current_mission()
 	if m == null or not players.has(id):
+		_spawn_blocked(id, "keine Mission geladen" if m == null else "nicht angemeldet")
 		return
 	if bool(players[id].get("spectator", false)):
+		_spawn_blocked(id, "Zuschauer (spectator, Karte %s, Stil %d)" % [String(settings.get("map", "")), mode()])
 		return
 	if in_setup(id):
+		_spawn_blocked(id, "im SPIELER-SETUP (in_setup, wartet auf setup_done)")
 		return                # 0.11.1: noch im SPIELER-SETUP, Spawn nach confirm_setup
+	if id > 0:
+		spawn_block_log[id] = ""
 	_touch(id)                # Inaktivität zählt ab dem (Wieder-)Einstieg
 	if players[id].has("next_team"):
 		players[id]["team"] = int(players[id]["next_team"])      # Teamwechsel aus dem SPIELER-SETUP
@@ -2008,6 +2026,10 @@ func _spawn(id: int, pname: String, team: int, pos: Vector3, yaw: float, gen: in
 	_attach_figure(m, s, team, pinfo)
 	s.set_meta("spawn_ms", Time.get_ticks_msec())
 	s.set_meta("protect_until", int(s.get_meta("spawn_ms")) + int(float(rule("spawn_protect_s")) * 1000.0))
+	# 0.11.6: Testläufe – Spieler unverwundbar (Server-Option nur per Startzeile). Nur im Entwicklungs-Binary
+	# (OS.is_debug_build), im exportierten Release wirkungslos – sonst unverwundbare Matches in der Rangliste möglich.
+	if id > 0 and multiplayer.is_server() and OS.is_debug_build() and OS.get_cmdline_user_args().has("--test_god=1"):
+		s.set_meta("protect_until", 1 << 60)
 	_soldiers[id] = s
 	_hp_sent[id] = s.health
 	if multiplayer.is_server():
@@ -2963,12 +2985,35 @@ func _next_round() -> void:
 
 ## Karte setzen (Stil folgt einer Original-MP-Karte mit festem Stil)
 func _set_map(id: String) -> void:
+	var old_mode := mode()
 	settings["map"] = id
 	var fixed = Game.MISSIONS.get(id, {}).get("mp_mode")
 	if fixed != null:
 		settings["mode"] = int(fixed)
 	elif mode() in [Mode.OCCUPATION, Mode.OBJECTIVES] or not coop_map_ok(id, mode()):
 		settings["mode"] = Mode.DEATHMATCH
+	restyle_rules(settings, old_mode, mode())
+
+
+## 0.11.6: Stilwechsel (Kartenrotation über Karten mit festem Stil): Regeln, die noch den Standard des alten Stils
+## tragen, bekommen den Standard des neuen Stils; vom Admin abweichend gesetzte Werte bleiben. Original hält je Stil
+## eine eigene Regeltabelle (0x618A00, +0x200 + Stil×0x58 [B Tabellen, P Nutzung je Karte]); die Erkennung „noch
+## Standard = nicht ausdrücklich gesetzt“ ist [D] (Konfigurationsdateien des Menüs schreiben alle Regeln aus).
+## Vorher galten z. B. nach „style objectives“ allowrespawn 0/respawntime 0 auch auf DM-Karten → kein Spawn.
+static func restyle_rules(c: Dictionary, from_mode: int, to_mode: int) -> void:
+	if from_mode == to_mode:
+		return
+	var a := style_defaults(from_mode)
+	var b := style_defaults(to_mode)
+	for k in a:
+		if not c.has(k) or not b.has(k):
+			continue
+		var v = c[k]
+		var d = a[k]
+		var same: bool = (typeof(v) == typeof(d) and v == d) \
+			or (typeof(v) in [TYPE_INT, TYPE_FLOAT, TYPE_BOOL] and typeof(d) in [TYPE_INT, TYPE_FLOAT, TYPE_BOOL] and float(v) == float(d))
+		if same:
+			c[k] = b[k]
 
 
 ## Sofortiger Karten-/Rundenwechsel (Konsole/Abstimmung: nextmap, mapname, restart)

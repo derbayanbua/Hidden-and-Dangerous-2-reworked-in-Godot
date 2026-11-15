@@ -117,11 +117,15 @@ func _test_map(id: String) -> void:
 		check(true, "%s: keine Treppen" % id)
 		return
 	var sel := _select(stairs)
-	var res := await _walk_all(m, sel)
-	var n := sel.size()
+	var res_all := await _walk_all(m, sel)
+	var res := res_all.filter(func(r): return not r.no_stand)
+	var n := res.size()
 	var rises: Array = sel.map(func(s): return s.rise)
 	rises.sort()
 	var notes: Array[String] = []
+	for r in res_all:
+		if r.no_stand:
+			notes.append("%s: Fuß ohne Stand, von unten nicht betretbar (nicht gezählt)" % r.name)
 	for r in res:
 		if not (r.up and r.down and r.nav and r.nav_walk):
 			notes.append("%s:%s%s%s%s" % [r.name, "" if r.up else " hinauf✗", "" if r.down else " hinunter✗",
@@ -420,7 +424,28 @@ func _walk_all(m: Mission, sel: Array) -> Array:
 		w.st = st
 		w.s = s
 		walkers.append(w)
-		res.append({"name": st.name, "up": false, "down": false, "nav": false, "nav_walk": false, "nav_note": ""})
+		res.append({"name": st.name, "up": false, "down": false, "nav": false, "nav_walk": false, "nav_note": "",
+			"no_stand": false})
+	await frames(20)
+	# B-010c: Standprobe – trägt der Fuß keinen Soldaten (fällt > 1 m), ist die Treppe von unten nicht betretbar
+	# (NORWAY T17/T18: Stahltreppen ab 11,8 m auf dem Tirpitz-Aufbau, darunter kein Podest – Absturz auf das Deck 6,8).
+	# Sie zählt dann nicht und steht mit Hinweis im Bericht.
+	await frames(45)          # Fall aus 5 m dauert ≈ 1 s
+	var foot_ok: Array = []
+	for w in walkers:
+		foot_ok.append(w.s.global_position.y > w.st.bottom.y - 1.0)
+		w.s.global_position = w.st.top + Vector3.UP * 0.05
+		w.s.velocity = Vector3.ZERO
+	await frames(75)
+	for i in walkers.size():
+		var w: Walker = walkers[i]
+		var top_ok: bool = w.s.global_position.y > w.st.top.y - 1.0
+		if not foot_ok[i]:
+			res[i].no_stand = true
+			print("   %s: Fuß trägt keinen Soldaten (Absturz), Austritt %s – von unten nicht betretbar, nicht gezählt" % [
+				w.st.name, "trägt" if top_ok else "trägt auch nicht"])
+		w.s.global_position = w.st.bottom + Vector3.UP * 0.05
+		w.s.velocity = Vector3.ZERO
 	await frames(20)
 	# 1. hinauf über die Trittmitten
 	for w in walkers:
@@ -463,13 +488,20 @@ func _walk_all(m: Mission, sel: Array) -> Array:
 		var path := NavigationServer3D.map_get_path(nav_map, a, b, true)
 		# Ende auf der Höhe der obersten Stufe (Netz endet ggf. bis 1,2 m vor einer Wand am Austritt)
 		# Netz liegt auf der Ersatzrampe, die oben bis ~0,4 m über der sichtbaren Stufe enden kann (+ Zellhöhe)
-		var end_ok := path.size() > 0 and _near(path[path.size() - 1], w.st.top, 1.2, 0.7)
+		# B-010c: bei übereinanderliegenden Läufen (ARCTIC2 Osttreppe x_schody13/14) fehlt unter dem nächsten Lauf der
+		# Kopfraum für das Netz (Agentenhöhe 1,6 m) → Netz endet bis 2 m vor dem obersten Tritt auf dem Podest; die
+		# KI-Begehung (unten) muss den obersten Tritt trotzdem erreichen
+		var end_ok := path.size() > 0 and _near(path[path.size() - 1], w.st.top, 2.0, 0.7)
 		var start_ok := _near(a, w.st.bottom, 0.8, 0.5)
 		res[i].nav = m.nav_ready and start_ok and end_ok
 		if not res[i].nav:
 			res[i].nav_note = "kein Netz" if not m.nav_ready else ("Fuß %s" % _v(a) if not start_ok else "Ende %s" % (_v(path[path.size() - 1]) if path.size() > 0 else "-"))
 			print("   %s KI-Pfad ✗: %s (Fuß %s, oben %s)" % [w.st.name, res[i].nav_note, _v(w.st.bottom), _v(w.st.top)])
 		var pts: Array = Array(path).slice(1) if res[i].nav else []
+		# wie AIBrain.update_movement: am Pfadende (nächster Pfadpunkt = eigene Lage) läuft die KI direkt aufs Ziel weiter
+		# (B-010c: NORWAY T10/T11 – Netz endet ~0,7 m vor dem Austritt, das Podest dahinter vernetzt Recast nicht)
+		if not pts.is_empty() and Vector2(pts[-1].x - w.st.top.x, pts[-1].z - w.st.top.z).length() > 0.3:
+			pts.append(w.st.top)
 		if pts.is_empty():
 			w.done = true
 		else:
@@ -603,14 +635,19 @@ func _drive(walkers: Array) -> void:
 						w.idx += 1
 						continue
 			var dir := d.normalized()
-			s.move_input = dir * (clampf(d.length() / 0.6, 0.35, 1.0) if last else 1.0)
+			# langsames Anlaufen des Endpunkts nur in der Ebene – liegt er noch höher (Netz endet erodiert mitten im Lauf,
+			# B-010c NORWAY T10/T11), blieb der Soldat mit 35 % Tempo an der nächsten Stahlstufe hängen
+			var slow := last and target.y - s.global_position.y < 0.15
+			s.move_input = dir * (clampf(d.length() / 0.6, 0.35, 1.0) if slow else 1.0)
 			s.look_yaw = atan2(-dir.x, -dir.z)
 		await get_tree().physics_frame
 	await frames(20)
 
 
+## Höhe ±0,35 m (wie KI-Phase): die begangene Original-Ersatzfläche liegt bis 0,24 m unter der sichtbaren Stufe
+## (B-010c: ARCTIC2 T11 oben auf T2_strop_03 bei −9,14, sichtbarer Tritt −8,9 → Soldat stand exakt 0,30 m tiefer)
 func _at(s: Soldier, p: Vector3) -> bool:
-	return _near(s.global_position, p, 0.6, 0.3)
+	return _near(s.global_position, p, 0.6, 0.35)
 
 
 func _near(a: Vector3, b: Vector3, horiz: float, vert: float) -> bool:

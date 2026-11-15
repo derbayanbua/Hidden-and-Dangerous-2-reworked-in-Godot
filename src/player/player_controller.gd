@@ -252,9 +252,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("stance_prone"):
 		active.stance_request = Soldier.Stance.CROUCH if active.stance_request == Soldier.Stance.PRONE else Soldier.Stance.PRONE
 	elif event.is_action_pressed("stance_stand"):
-		active.jump_or_climb()
+		if not active.ladder_dismount():
+			active.jump_or_climb(false)            # Leitern nur per Benutzen-Taste [D]
 	elif event.is_action_pressed("jump"):
-		active.jump_only()                     # B-015: Original SPRINGEN (getrennt von KLETTERN)
+		if not active.ladder_dismount():
+			active.jump_only()                   # B-015: Original SPRINGEN (getrennt von KLETTERN)
 	elif event.is_action_pressed("climb"):
 		if not active.climb_only():
 			Events.say("Hier kann man nicht klettern.", 1.2)
@@ -297,6 +299,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		if w and w.toggle_fire_mode():
 			Events.say("Feuermodus: %s" % w.fire_mode_text(), 1.5)
 	elif event.is_action_pressed("interact"):
+		if active.ladder_dismount():
+			return                                         # erneutes Benutzen auf der Leiter: absteigen
 		if active.vehicle != null:
 			# Aussteigen: Fahrer lässt alle aussteigen
 			var v: Vehicle = active.vehicle
@@ -495,6 +499,7 @@ func _physics_process(_delta: float) -> void:
 	active.lean = l if active.stance != Soldier.Stance.PRONE else 0.0
 	active.aim_point = rig.crosshair_point()
 	active.has_aim_point = true
+	active.aim_rig = rig     # 0.11.6 [B] 0x5433B0: Schuss ab Kamera (Soldier._fire_shot)
 	# Rückstoß auf die Blickrichtung anwenden
 	var r := active.consume_recoil()
 	if r != Vector2.ZERO:

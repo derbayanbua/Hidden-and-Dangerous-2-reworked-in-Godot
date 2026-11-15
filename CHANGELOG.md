@@ -2,6 +2,103 @@
 
 
 
+## 0.11.6 (15.11.2026)
+
+**DE**
+- **Fallschaden wie im Original:** Gemessen wird vom höchsten Punkt des Flugs bis zur Landung. Bis 3 m kein Schaden,
+  darüber steigt er linear (24 Lebenspunkte je Meter) bis höchstens 100; eine 100-LP-Figur stirbt ab etwa 7,2 m.
+  Gilt im Einzelspieler für Spieler, Trupp und Gegner; Leitern, Klettern, Treppen und Rampen bleiben ohne Schaden.
+  Im Mehrspieler (Regel Fallschaden) entscheidet der Server, der Kill-Feed nennt den Sturz als Ursache.
+- **Zielen und Treffen:** In der 1. Person startet der Schuss wie im Original an der Kamera (Visierlinie) statt am Kopf;
+  das Geschoss trifft dort, wo Bildmitte, Kimme/Korn oder Absehen hinzeigen (Geschossabfall wie im Original, mit
+  „Präzises Zielen“ ausgeglichen). Pistolen-Visierung beim Zielen korrigiert: Korn liegt auf der Bildmitte, Lauf
+  parallel zur Blickrichtung (vorher bei P08, Enfield .38, Typ 94 und Tokarew weit daneben, Colt schräg). Neue
+  Testreihe für alle Visier- und Zielfernrohrwaffen in Einzel- und Mehrspieler.
+- **Schrotflinte (Side by Side):** trifft ungezoomt wieder; wie im Original ein Geschoss mit der geringen Originalstreuung
+  ohne zusätzliche Hüftstreuung (vorher bis 3° daneben).
+- **Eigene Beine in der 1. Person:** Beim Blick nach unten sieht man nicht mehr durch die Oberschenkel auf den Boden
+  (die abgeschnittene Beinkopie wird beidseitig gezeichnet).
+- **Dedizierter Server – Kartenrotation über mehrere Spielstile:** Regeln, die noch dem Standard des vorherigen Stils
+  entsprechen, folgen jetzt dem Stil der neuen Karte (z. B. Respawn auf Deathmatch-Karten, auch wenn die
+  Konfiguration „style objectives“ enthält); vom Admin abweichend gesetzte Werte bleiben erhalten. Vorher konnten
+  Spieler und KI-Soldaten auf solchen Servern nur zuschauen bzw. kamen nach dem Tod nicht zurück. Reiner Server-Fix,
+  ältere Clients bleiben kompatibel. Das Server-Log nennt jetzt den Grund, warum ein Spieler nicht gespawnt wird.
+- **KI-Wege ARCTIC2/NORWAY:** In den Treppenhäusern von ARCTIC2 fanden die Treppen-Verbindungen der KI keinen Anschluss
+  an die Podeste – die Startinsel von Commando1 war für die KI abgetrennt. Verbindungen werden jetzt an das nächste
+  Podest angeheftet und Rampenenden angebunden. Die Stahltreppen auf der Tirpitz (NORWAY) sind über reine
+  Navigationsflächen (ohne Kollision) im Netz; die KI erreicht die oberen Plattformen.
+- **Erfüllbarkeitslöser:** Strategie „leise“ schaltet Gegner, deren Skript selbst ein Ziel scheitern lässt, sofort aus
+  (ARCTIC4: Offizier am U-Boot); zerstörbare Objekte, auf denen der Trupp steht, werden nicht mehr gesprengt.
+- **Türteile und Türrahmen (ARCTIC2 und weitere Karten):** Lage-Ergänzungen der Originalszene (scene2.bin) für
+  Modellteile werden jetzt übernommen: Türfenster mit Gitter hängen am beweglichen Türflügel und drehen mit (vorher
+  blieb das Gitter im Rahmen stehen), falsch gedrehte Türzargen stehen wieder in ihrer Öffnung. Türabgleich im
+  Mehrspieler unverändert.
+- **Visiersicht im Fahrzeug im Breitbild:** Richtschützen- und Bordwaffensitze (Panzer, Halbketten …) zeigen das
+  Sichtfeld wie im Original als 4:3-Ausschnitt; links und rechts (16:9, 16:10, 21:9) bzw. oben und unten (5:4) ist
+  das Bild schwarz, statt am Visier vorbei in die Szene zu schauen. Vertikales Sichtfeld wie im Original, Einzel- und
+  Mehrspieler gleich.
+
+- **Hüftstreuung wie im Original:** Das Original kennt keinen eigenen Hüftanschlag-Zweig; alle Waffen mit Originalwert
+  streuen aus der Hüfte jetzt genauso wie beim Zielen (vorher geschätzte 2,8–4,5°).
+- **Leitern:** Einstieg im ganzen Spiel nur noch per Benutzen-Taste (vorher genügte Dagegenlaufen); KI unverändert.
+- **Mehrspieler-Minikarte (neu, eigene Ergänzung):** genordete Karte am rechten Bildrand mit eigener Position und
+  Blickrichtung; in Team-Spielstilen erscheinen lebende Verbündete in Teamfarbe (im Deathmatch hat niemand Verbündete).
+  Gegner sind nur zu sehen, wenn sie schießen: eine Marke an der Schützenlage blendet in 2,5 s aus. Waffen mit
+  Schalldämpfer verraten den Schützen nie. Zuschauer sehen die Karte des beobachteten Spielers. Keine Protokolländerung.
+- **Bavaria:** Randbüsche ohne schwarzen Kern, Bäume im dichten Wald sauber geerdet; neuer Stollen vom MG42-Haus zum
+  Antennenhaus und zum ersten Reihenhaus; nächtlicher Suchscheinwerferturm.
+- **Testserver:** Die Startoption für unverwundbare Testspieler wirkt nur noch im Entwicklungs-Binary, nie im Release.
+- **README:** Abschnitt „Kein 100 % Vanilla mehr“ gekürzt.
+- **Ausblick 0.12:** Werkzeugmenü (Originaldaten-Konvertierung) auch für Linux geplant.
+
+**EN**
+- **Falling damage as in the original:** Measured from the highest point of the fall to the landing. No damage up to
+  3 m, above that it rises linearly (24 health points per metre) up to a maximum of 100; a 100 HP figure dies from about
+  7.2 m. Applies in single player to the player, squad and enemies; ladders, climbing, stairs and ramps cause no damage.
+  In multiplayer (falling damage rule) the server decides, and the kill feed names the fall as the cause.
+- **Aiming and hitting:** In first person the shot now starts at the camera (line of sight) as in the original instead
+  of at the head; the bullet hits where the screen centre, iron sights or reticle point (bullet drop as in the
+  original, compensated with "Precise aiming"). Pistol sights when aiming fixed: the front sight sits on the screen
+  centre and the barrel is parallel to the view (previously far off for P08, Enfield .38, Type 94 and Tokarev, Colt
+  tilted). New test series for all iron-sight and scoped weapons in single and multiplayer.
+- **Shotgun (Side by Side):** hits again when firing from the hip; as in the original it fires one projectile with the
+  small original spread and no extra hip spread (previously up to 3° off).
+- **Own legs in first person:** Looking down no longer shows the ground through the thighs (the cut leg copy is now
+  drawn double-sided).
+- **Dedicated server – map rotation across several game styles:** Rules that still match the default of the previous
+  style now follow the style of the new map (e.g. respawn on deathmatch maps even if the configuration contains
+  "style objectives"); values set differently by the admin are kept. Previously players and AI soldiers on such servers
+  could only spectate or did not come back after dying. Server-side fix only, older clients stay compatible. The server
+  log now states why a player is not spawned.
+- **AI paths ARCTIC2/NORWAY:** In the ARCTIC2 stairwells the AI's stair connections found no polygon on the landings, so
+  Commando1's starting area was cut off for the AI. Connections are now attached to the nearest landing and ramp ends
+  are joined. The steel stairs on the Tirpitz (NORWAY) are part of the navigation mesh via navigation-only surfaces
+  (no collision); the AI reaches the upper platforms.
+- **Completability solver:** The "quiet" strategy now immediately takes out enemies whose own script fails an objective
+  (ARCTIC4: officer at the U-boat); destructible objects the squad is standing on are no longer blown up.
+- **Door parts and door frames (ARCTIC2 and other maps):** Placement overrides of the original scene (scene2.bin) for
+  model parts are now applied: door windows with grilles are attached to the moving door leaf and swing with it
+  (previously the grille stayed in the frame), wrongly rotated door frames stand in their opening again. Multiplayer
+  door sync unchanged.
+- **Vehicle gunner view on wide screens:** Gunner and vehicle weapon seats (tanks, half-tracks …) show the view as a
+  4:3 area as in the original; left and right (16:9, 16:10, 21:9) or top and bottom (5:4) are black instead of
+  showing the scene past the sight. Vertical field of view as in the original, same in single and multiplayer.
+- **Hip spread as in the original:** The original has no separate hip-fire branch; all weapons with an original value
+  now spread from the hip exactly as when aiming (previously estimated 2.8–4.5°).
+- **Ladders:** Climbing on is now done with the use key everywhere in the game (previously walking into them was
+  enough); AI unchanged.
+- **Multiplayer minimap (new, own addition):** north-up map at the right edge of the screen with your own position and
+  facing; in team styles living allies appear in their team colour (in deathmatch nobody is an ally). Enemies only show
+  up when they fire: a mark at the shooter's position fades out within 2.5 s. Weapons with a suppressor never reveal
+  the shooter. Spectators see the map of the player they are watching. No protocol change.
+- **Bavaria:** Edge bushes without a black core, trees in the dense forest properly grounded; new tunnel from the MG42
+  house to the antenna house and the first terraced house; searchlight tower at night.
+- **Test server:** The start option for invulnerable test players now only works in the development binary, never in
+  a release.
+- **README:** Section "No longer 100 % vanilla" shortened.
+- **Outlook 0.12:** Tool menu (original data conversion) planned for Linux as well.
+
+
 ## 0.11.5 (14.11.2026)
 
 **DE**

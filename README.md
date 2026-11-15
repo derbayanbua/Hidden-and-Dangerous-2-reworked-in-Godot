@@ -34,19 +34,7 @@ Tarnung, Fahrzeuge, Original-Missionsabläufe.
 ### Kein 100 % Vanilla mehr
 
 Einzelne Texturen, Effekte und Objekte wurden bereits durch neuere ersetzt bzw. ergänzt. Das Spiel ist daher
-optisch nicht mehr zu 100 % identisch mit dem Original. Beispiele:
-
-| Ersetzt / ergänzt | Herkunft / Lizenz |
-|---|---|
-| Wasser je Klimazone (Original-Wasser in den Optionen wählbar) | eigener Shader, Verfahren angelehnt an „Water shader 3D“ von Lesus (CC0), siehe `THIRD_PARTY_LICENSES.txt` |
-| Explosionen, Himmel/Wolken, Wolkenschatten, Schneefall, Bluteffekte | eigene, prozedural erzeugte Effekte (Projektlizenz) |
-| Himmel (HDRI je Klimazone) | Poly Haven (polyhaven.com), CC0, siehe `docs/SKY_SOURCES.md` |
-| Funkantenne der Testkarte | eigenes Modell, für dieses Projekt erstellt (Projektlizenz) |
-| Platzhalter-Waffen, die in der Installation fehlen (z. B. Panzerschreck, G43) | eigene Platzhalter-Modelle (Projektlizenz) |
-| HD-/4K-Texturen (optional) | lokal per KI aus den eigenen Originaltexturen erzeugt, nicht im Paket |
-
-Spielwerte (Schaden, Reichweiten, Missionsabläufe) bleiben am Original; Fremdquellen stehen in den Credits und in
-`THIRD_PARTY_LICENSES.txt`.
+optisch nicht mehr zu 100 % identisch mit dem Original.
 
 ### Funktionen im Überblick
 
@@ -240,19 +228,7 @@ mission flow.
 ### No longer 100 % vanilla
 
 Some textures, effects and objects have already been replaced or extended with newer ones, so the game no longer looks
-100 % identical to the original. Examples:
-
-| Replaced / added | Source / licence |
-|---|---|
-| Water per climate zone (original water selectable in the options) | own shader, technique based on "Water shader 3D" by Lesus (CC0), see `THIRD_PARTY_LICENSES.txt` |
-| Explosions, sky/clouds, cloud shadows, snowfall, blood effects | own procedurally generated effects (project licence) |
-| Sky (HDRI per climate zone) | Poly Haven (polyhaven.com), CC0, see `docs/SKY_SOURCES.md` |
-| Radio antenna of the test map | own model made for this project (project licence) |
-| Placeholder weapons missing from the installation (e.g. Panzerschreck, G43) | own placeholder models (project licence) |
-| HD/4K textures (optional) | generated locally by AI from your own original textures, not in the package |
-
-Gameplay values (damage, ranges, mission flow) stay with the original; third-party sources are listed in the credits
-and in `THIRD_PARTY_LICENSES.txt`.
+100 % identical to the original.
 
 ### Features at a glance
 

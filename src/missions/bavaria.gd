@@ -17,6 +17,8 @@ const FieldTrenches := preload("res://src/maps/bavaria/field_trenches.gd")
 const SceneMatch := preload("res://src/maps/bavaria/scene_match.gd")
 const StreetLamps := preload("res://src/maps/bavaria/street_lamps.gd")
 const DayNight := preload("res://src/maps/bavaria/day_night.gd")
+const Tunnels := preload("res://src/maps/bavaria/tunnels.gd")
+const SearchlightTower := preload("res://src/maps/bavaria/searchlight_tower.gd")
 const REF_ORIGIN := Vector2(650, 720)
 const X_AXIS := Vector2(0.576, 0.817)
 const Z_AXIS := Vector2(-0.817, 0.576)
@@ -39,6 +41,8 @@ var frontline := false
 var prank_mines: Node3D
 var room_lighting: Node3D
 var street_lamps: RefCounted          ## Wegbeleuchtung (street_lamps.gd)
+var tunnels: RefCounted               ## Stollensystem (tunnels.gd)
+var searchlight_tower: Node3D         ## Suchturm auf der Wiese (searchlight_tower.gd, Knoten „Suchturm“)
 # Tageszyklus: geerbtes Mission.day_night = src/maps/bavaria/day_night.gd (Knoten „Tageszeit“; der allgemeine
 # src/world/day_night.gd gilt nur für seine eigene Kartenliste und bleibt hier null)
 var og_glass_material: Material       ## warmer Schein der geschlossenen OG-Fenster (Tageszyklus)
@@ -82,12 +86,15 @@ func _build_world() -> void:
 	_templates = Templates.new(lb)
 	ground_surfaces = GroundSurfaces.new(lb)
 	# Rein optische Fortsetzung außerhalb der Spielgrenze, ohne Boden-/Navmesh-Kollision.
+	var extras := String(Game.cli.get("stollen", "1")) != "0"   # --stollen=0: ohne Stollen/Suchturm (Vergleichsläufe)
+	var tunnel_holes: Array = Tunnels.hole_polygons(self) if extras else []   # Treppenlöcher der Stollen
 	_ground(PackedVector2Array([Vector2(-1400,-1400),Vector2(1400,-1400),Vector2(1400,1400),Vector2(-1400,1400)]),
-		"meadow", -0.3, false, "DistantCountryside", {}, [_house16_cellar_hole()] + FieldTrenches.hole_polygons())
+		"meadow", -0.3, false, "DistantCountryside", {}, [_house16_cellar_hole()] + FieldTrenches.hole_polygons() + tunnel_holes)
 	# Spielboden mit Aussparung für den Kellerhals von Haus 16 (begehbarer Keller nach Plan).
-	# + abgesenkte Schützengräben auf dem Feld (FieldTrenches).
+	# + abgesenkte Schützengräben auf dem Feld (FieldTrenches) + Stolleneinstiege (Tunnels).
 	var holes: Array = [_house16_cellar_hole()]
 	holes.append_array(FieldTrenches.hole_polygons())
+	holes.append_array(tunnel_holes)
 	_ground(boundary, "grass", 0.0, true, "PlayableGround", {}, holes)
 	_ground(polygon(layout["meadow"]), "meadow", 0.012, false, "Wiese", {}, FieldTrenches.hole_polygons())
 	_build_roads()
@@ -108,9 +115,18 @@ func _build_world() -> void:
 	FieldTrenches.build_cover(self)
 	interior_decoration = InteriorDecoration.new()
 	interior_decoration.build(self)
+	if extras:
+		tunnels = Tunnels.new()
+		tunnels.build(self)
+		searchlight_tower = SearchlightTower.new()
+		searchlight_tower.build(self)
+		add_child(searchlight_tower)      # feste Knotenlage „Suchturm“: Knoten-RPCs zwischen Server und Clients
 	_build_gardens()
 	_build_woodland()
 	_templates.ground_vegetation(self)
+	if extras:
+		# Stollengrube erst hier als Grundriss: Bäume darin entfernen, ohne die Zufallsverteilung davor zu verschieben
+		building_footprints.append_array(Tunnels.footprints(self))
 	_cull_trees_at_buildings()
 	_batch_tree_visuals()
 	_build_details()

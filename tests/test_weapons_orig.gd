@@ -176,14 +176,18 @@ func _run() -> void:
 	Input.action_press("aim")
 	await seconds(1.2)
 	var pz_ok := rig.zoomed() and rig.fpv_active and absf(rig.camera.fov - want) < 0.5
-	var fixed: bool = rig._vm_fix != Vector3.INF
+	var fixed: bool = rig._vm_fixed
 	var top := Vector3.INF
+	var ax := INF
 	if fixed:
-		top = rig._measure_sight() - rig._vm_weapon.position    # nötiger Zusatzversatz nach der Korrektur ≈ 0
+		var sl: Dictionary = rig.fpv_sight_line()       # 0.11.6: Korn auf der Blickachse, Laufachse parallel
+		if not sl.is_empty():
+			top = sl["sight"]
+			ax = rad_to_deg((sl["axis"] as Vector3).angle_to(Vector3.FORWARD))
 	Input.action_release("aim")
 	await seconds(0.8)
-	check(pz_ok and fixed and top.is_finite() and Vector2(top.x, top.y).length() < 0.01,
-		"Pistole: Zoom 48° in der Ego-Ansicht, Visierlinie auf der Bildmitte", str(top))
+	check(pz_ok and fixed and top.is_finite() and Vector2(top.x, top.y).length() < 0.002 and ax < 0.3,
+		"Pistole: Zoom 48° in der Ego-Ansicht, Visierlinie auf der Bildmitte", "%s %.2f°" % [str(top), ax])
 	s.equip(["o_13", "colt", "m24", "panzerfaust", "knife"])
 	await seconds(0.6)
 	Input.action_press("aim")

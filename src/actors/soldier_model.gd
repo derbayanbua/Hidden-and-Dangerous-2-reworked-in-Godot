@@ -207,8 +207,24 @@ func set_fpv_body(mode: int) -> void:
 			var src := int(legs.get_meta("src_surfaces", [])[i]) if legs.has_meta("src_surfaces") else i
 			var m := mi.get_active_material(src)
 			if m:
-				c.set_surface_override_material(i, m)
+				c.set_surface_override_material(i, _fpv_leg_material(m))
 		_fpv_legs.append(c)
+
+
+## 0.11.6 [D-Befund „durch die Beine sehen“]: Der Schnitt bei halber Bindeposen-Höhe lässt die Beinröhren oben offen.
+## Blickt die Kamera von oben hinein, sind die Innenseiten Rückseiten und werden weggeschnitten (Standard Cull Back) –
+## man sah durch die Oberschenkel auf den Boden. Die Kopie zeichnet daher beidseitig.
+static var _leg_mats := {}
+
+
+static func _fpv_leg_material(m: Material) -> Material:
+	if not (m is BaseMaterial3D):
+		return m
+	if not _leg_mats.has(m):
+		var d := (m as BaseMaterial3D).duplicate() as BaseMaterial3D
+		d.cull_mode = BaseMaterial3D.CULL_DISABLED
+		_leg_mats[m] = d
+	return _leg_mats[m]
 
 
 ## Neue Teile (Helm, Rückenwaffe) während der 1. Person: Darstellung neu anwenden (sonst ragt der Helm ins Bild).

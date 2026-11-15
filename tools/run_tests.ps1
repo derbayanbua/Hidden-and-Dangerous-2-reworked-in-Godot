@@ -43,6 +43,8 @@ $suites = @(
   @{ name = "test_commands_orig"; args = "--headless -- --mission=a1_blizzard --autoplay=test_commands_orig" },
   @{ name = "test_sp_weapons"; args = "--headless -- --mission=a1_blizzard --autoplay=test_sp_weapons" },
   @{ name = "test_aim_ballistics"; args = "--headless -- --mission=a1_blizzard --autoplay=test_aim_ballistics" },   # 0.10.1 Visier/Ballistik/Muendungsfeuer/Atem
+  @{ name = "test_weapons_aim"; args = "--headless -- --mission=a1_blizzard --autoplay=test_weapons_aim"; timeout = 1800 },   # 0.11.6 Visier = Einschlag (SP)
+  @{ name = "test_weapons_aim_mp"; args = "--headless -- --autoplay=test_weapons_aim --phase=mp"; mp = $true; timeout = 1800 },   # 0.11.6 Visier = Einschlag (MP Host/Client)
   @{ name = "test_a2";       args = "--headless -- --mission=a2_erkundung --autoplay=test_orig_part --commandos=1" },
   @{ name = "test_a2_interaktiv"; args = "--headless -- --mission=a2_erkundung --autoplay=test_a2" },
   @{ name = "test_a3";       args = "--headless -- --mission=a3_rendezvous --autoplay=test_orig_part --commandos=4" },
@@ -69,6 +71,8 @@ $suites = @(
   @{ name = "test_b017_af1"; args = "--headless -- --mission=af1_spaghetti_airport --autoplay=test_b017 --phase=doors" },
   @{ name = "test_b017_a2"; args = "--headless -- --mission=a2_erkundung --autoplay=test_b017 --phase=doors --skip_doors=M_D_PO34" },
   @{ name = "test_b017_no2"; args = "--headless -- --mission=no2_schwerttaenzer --autoplay=test_b017 --phase=doors" },
+  # Tuerteile/scene2-Lage (0.11.6): ARCTIC2 Tuerfenster drehen mit, Zarge p4sah16 aufrecht
+  @{ name = "test_door_parts"; args = "--headless -- --autoplay=test_door_parts --maps=mp_arctic2_mp,mp_normandy2_mp_zone"; mp = $true },
   @{ name = "test_b017_arctic"; args = "--headless -- --mission=a1_blizzard --autoplay=test_b017 --phase=arctic" },
   @{ name = "test_arctic2_licht"; args = "--headless -- --mission=a2_erkundung --autoplay=test_arctic2_licht" },
   @{ name = "test_b017_mp"; args = "--headless -- --autoplay=test_b017 --phase=mp_markers"; mp = $true },
@@ -79,6 +83,7 @@ $suites = @(
   @{ name = "test_items";    args = "--headless -- --mission=af1_spaghetti_airport --autoplay=test_items" },
   @{ name = "test_vehicle_types"; args = "--headless -- --mission=af1_spaghetti_airport --autoplay=test_vehicle_types"; timeout = 2400 },
   @{ name = "test_tank";     args = "--headless -- --mission=af1_spaghetti_airport --autoplay=test_tank" },
+  @{ name = "test_vehicle_sight"; args = "--headless -- --mission=af1_spaghetti_airport --autoplay=test_vehicle_sight" },   # Visiersicht 4:3-Maske je Seitenverhaeltnis
   @{ name = "test_tank_rockets"; args = "--headless -- --mission=af1_spaghetti_airport --autoplay=test_tank_rockets" },   # Raketen gegen panzer01 (docs/status/panzer_schaden.md)
   @{ name = "test_water";    args = "--headless -- --mission=nw1_dampfleitung --autoplay=test_water" },
   @{ name = "test_orig_vehicles_cz1"; args = "--headless -- --mission=cz1_eintrittsgeld --autoplay=test_orig_vehicles" },
@@ -107,24 +112,28 @@ $suites = @(
   @{ name = "test_b050";     args = "--headless -- --autoplay=test_b050 --shots=0 --missions=af1_spaghetti_airport,bu1_ameisenhuegel --profiles_dir=user://test_b050"; timeout = 1500 },
   @{ name = "test_tools_mines"; args = "--headless -- --mission=m01_funkfeuer --autoplay=test_tools_mines" },
   @{ name = "test_tools_mines_mp"; args = "--headless -- --autoplay=test_tools_mines --phase=mp"; mp = $true },
+  @{ name = "test_fall_damage"; args = "--headless -- --mission=m01_funkfeuer --autoplay=test_fall_damage" },
+  @{ name = "test_fall_damage_mp"; args = "--headless -- --autoplay=test_fall_damage --phase=mp"; mp = $true },
   # test_inventory: sp + mp (zweiprozessig mit test_inventory_client)
   @{ name = "test_inventory"; args = "--headless -- --mission=m01_funkfeuer --autoplay=test_inventory --phase=all"; mp = $true },
   @{ name = "test_net";      args = "--headless -- --autoplay=test_net"; mp = $true },
   @{ name = "test_mp_modes"; args = "--headless -- --autoplay=test_mp_modes"; mp = $true },
   # B-009, MP-Bots zurückgestellt ([D] 24.10.2026): test_bots vorerst nicht Teil der Gesamtsuite
   # 06.11.2026 (abschluss_099): im -Full-Lauf wieder dabei – BotGoals/BotBrain-Kartenhinweise prüfen
-@{ name = "test_bots";     args = "--headless -- --autoplay=test_bots"; mp = $true; group = "full"; timeout = 2400 },   # nav-Phase über alle MP-Karten > 15 min
+@{ name = "test_bots";     args = "--headless -- --autoplay=test_bots"; mp = $true; group = "full"; timeout = 3600 },   # nav-Phase über alle MP-Karten > 15 min
   @{ name = "test_lan_e2e";  args = "--headless -- --autoplay=test_lan_e2e --profiles_dir=user://test_lan_host --noimport"; mp = $true },
   @{ name = "test_mp_features"; args = "--headless -- --autoplay=test_mp_features --profiles_dir=user://test_mp_features --noimport"; mp = $true },
   # 0.11.5: Tag-/Nachtwechsel auf allen Karten (nur MP): Regel aus/an, Glätte, Grafikstufe, Spät-Beitritt, SP unberührt
   @{ name = "test_mp_daynight"; args = "--headless -- --mission=m01_funkfeuer --autoplay=test_mp_daynight --profiles_dir=user://test_mp_daynight"; mp = $true; timeout = 900 },
   @{ name = "test_mp_weapons"; args = "--headless -- --autoplay=test_mp_weapons --phase=all"; mp = $true },
   @{ name = "test_dedicated"; args = "--headless -- --autoplay=test_dedicated --profiles_dir=user://test_ded --noimport"; mp = $true },
+  @{ name = "test_dedicated_spawn"; args = "--headless -- --autoplay=test_dedicated_spawn --setup_gate=1 --profiles_dir=user://test_ded_spawn --noimport"; mp = $true; timeout = 2500 },   # 0.11.6 Spawn auf dediziertem Server mit Setup-Sperre
   @{ name = "test_dedicated_ui"; args = "--headless -- --autoplay=test_dedicated_ui --profiles_dir=user://test_ded_ui --noimport"; mp = $true },   # 0.10.3 Konfigurationsmenue dedizierter Server
   @{ name = "test_mp_setup_ui"; args = "--headless -- --autoplay=test_mp_setup_ui --profiles_dir=user://test_mp_setup --noimport"; mp = $true },
   @{ name = "test_leaderboard"; args = "--headless -- --autoplay=test_leaderboard --profiles_dir=user://test_leaderboard --noimport" },   # 0.11.5 Rangliste (lokaler Master-Nachbau)
   @{ name = "test_mp_browser"; args = "--headless -- --autoplay=test_mp_browser --profiles_dir=user://test_mp_browser --noimport --setup_gate=1"; mp = $true },   # 0.11.1 Serverbrowser + Setup vor Spawn
   @{ name = "test_mp_feedback"; args = "--headless -- --autoplay=test_mp_feedback"; mp = $true },
+  @{ name = "test_mp_minimap"; args = "--headless -- --autoplay=test_mp_minimap"; mp = $true },
   @{ name = "test_support_strike"; args = "--headless -- --autoplay=test_support_strike"; mp = $true },
   @{ name = "test_net_authority"; args = "--headless -- --autoplay=test_net_authority"; mp = $true },
   @{ name = "test_net_master"; args = "--headless -- --autoplay=test_net_master"; mp = $true },   # 0.11.1 Spiel <-> Master (2 Prozesse, lokaler Mock)
@@ -137,6 +146,7 @@ $suites = @(
   @{ name = "test_bavaria_ground_mg42"; args = "--headless -- --mission=bavaria_occupation --autoplay=test_bavaria_ground_mg42"; timeout = 1200 },
   @{ name = "test_bavaria_clipping"; args = "--headless -- --mission=bavaria --autoplay=test_bavaria_clipping"; timeout = 1500 },
   @{ name = "test_bavaria_daynight"; args = "--headless -- --mission=bavaria --autoplay=test_bavaria_daynight"; timeout = 1200 },
+  @{ name = "test_bavaria_tunnels"; args = "--headless -- --mission=bavaria --autoplay=test_bavaria_tunnels"; timeout = 1200 },
   @{ name = "test_bavaria_integration"; args = "--headless -- --autoplay=test_bavaria_integration"; mp = $true; timeout = 1800 },
   @{ name = "test_bavaria_mp"; args = "--headless -- --autoplay=test_bavaria_mp"; mp = $true; group = "full"; timeout = 1800 },
   # --- Gruppe "full" (nur mit -Full): lange Läufe ---

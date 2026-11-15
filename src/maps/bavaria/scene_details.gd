@@ -431,7 +431,10 @@ func _border_bush(pos: Vector3, yaw: float, height: float, parent: Node3D) -> No
 	core.mesh = border_core_mesh
 	core.material_override = border_core_material
 	root.add_child(core)
-	core.global_transform = Transform3D(Basis(Vector3.UP,yaw)*Basis.from_scale(Vector3(2.3,height*0.46,1.2)),pos+Vector3.UP*(height*0.45))
+	core.global_transform = Transform3D(Basis(Vector3.UP,yaw)*Basis.from_scale(Vector3(1.5,height*0.32,0.75)),pos+Vector3.UP*(height*0.5))
+	# Baumfix: der glatte 8-Eck-Kern wirkte aus der Nähe (Zaun) als riesiger schwarzer Block → ausgeblendet,
+	# Lücken schließen die Originalblätter und der Waldgürtel dahinter.
+	core.visible = false
 	root.add_to_group("bavaria_exterior_foliage")
 	root.add_to_group("bavaria_ground_foliage")
 	return root
@@ -539,15 +542,32 @@ func _outer_forest_dense(center: Vector2) -> void:
 	var species := ["l_tree","l_tree2","l_tree4"]
 	var parts := {}        # Art → [[Mesh, rel. Transform], …]
 	var sizes := {}
+	var base_lift := {}    # Art → Stammfußhöhe in Modelleinheiten (nur l_tree2 ≠ 0)
 	for key in species:
 		var sample := t.prop(key,Vector3.ZERO,0,1.0) as Node3D
 		if sample == null:
 			continue
 		sizes[key] = (t.mesh_bounds(sample,Transform3D.IDENTITY) as AABB).size
 		var list := []
+		var lowest := INF
+		var ring_low := INF
 		for mesh in sample.find_children("*","MeshInstance3D",true,false):
-			list.append([(mesh as MeshInstance3D).mesh,sample.global_transform.affine_inverse()*mesh.global_transform])
+			var rel: Transform3D = sample.global_transform.affine_inverse()*mesh.global_transform
+			list.append([(mesh as MeshInstance3D).mesh,rel])
+			if key=="l_tree2" and String(mesh.name)=="tree":
+				# Wie ground_vegetation: l_tree2 hat dünne Wurzelausläufer ~2,5m UNTER dem Stammfuß.
+				var ys: Array[float] = []
+				for s in mesh.mesh.get_surface_count():
+					for v in mesh.mesh.surface_get_arrays(s)[Mesh.ARRAY_VERTEX]:
+						ys.append((rel*v).y)
+				for y in ys:
+					lowest = minf(lowest,y)
+				for y in ys:
+					if y-lowest>=2.5 and y-lowest<2.75:
+						ring_low = minf(ring_low,y)
 		parts[key] = list
+		# Höhe des echten Stammfußes über dem Modell-Nullpunkt (Probe steht bei y = 0).
+		base_lift[key] = ring_low if ring_low<INF else 0.0
 		sample.remove_from_group("bavaria_all_tree_roots")
 		sample.get_parent().remove_child(sample)
 		sample.free()
@@ -583,7 +603,9 @@ func _outer_forest_dense(center: Vector2) -> void:
 				var h := 10.5+2.5*absf(sin(i*0.61+edge+row*1.7))+1.0*row
 				var w := 6.2+0.8*absf(cos(i*0.9+row))
 				var basis := Basis(Vector3.UP,i*1.13+edge*0.7+row)*Basis.from_scale(Vector3(w/maxf(sz.x,0.1),h/maxf(sz.y,0.1),w/maxf(sz.z,0.1)))
-				xforms[ck].append(Transform3D(basis,Vector3(pos.x,-0.25,pos.y)))
+				# Stammfuß wie ground_vegetation auf den Außenboden (−0,30 m) und 4,5 cm eingesenkt.
+				var foot_y := -0.345-float(base_lift.get(key,0.0))*h/maxf(sz.y,0.1)
+				xforms[ck].append(Transform3D(basis,Vector3(pos.x,foot_y,pos.y)))
 	var root := Node3D.new()
 	root.name = "AeussererWaldDicht"
 	m.dynamic_root.add_child(root)
