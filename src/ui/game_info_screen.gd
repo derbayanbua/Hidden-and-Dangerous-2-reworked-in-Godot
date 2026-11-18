@@ -148,9 +148,10 @@ func info_lines() -> PackedStringArray:
 		"Funk-Unterstützung: %s" % (["aus", "Artillerie", "Luftangriff", "Artillerie + Luftangriff"][clampi(int(r.get("support_strike", 0)), 0, 3)]
 			+ ("" if int(r.get("support_strike", 0)) == 0 else " (alle %d min%s)" % [int(r.get("support_interval_min", 5)), ", KI" if bool(r.get("support_bots", false)) else ""])),
 		# 0.11.5: Tag-/Nachtwechsel (alle Karten, nur MP)
-		"Tag/Nacht: %s" % ("aus" if not bool(r.get("day_night", false)) else "an (%s, %d min je Tag)" % [
+		"Tag/Nacht: %s" % ("aus" if not bool(r.get("day_night", false)) or not ((int(r.get("dn_modes", 31)) >> clampi(mode, 0, 4)) & 1) else "an (%s, %d min je Tag)" % [
 			"Kartenstimmung" if int(r.get("dn_start_h", -1)) < 0 else "%d Uhr" % int(r.get("dn_start_h", -1)),
-			int(r.get("dn_cycle_min", 60))])]
+			int(r.get("dn_cycle_min", 60))]),
+		"Minikarte: %s" % ("an" if bool(r.get("minimap", false)) else "aus")]
 	# B-029 Coop-Regeln (Original-Texte 20210–20213); Fadenkreuz wie im Original nur angezeigt
 	if mode == Net.Mode.COOP:
 		var lv := int(r.get("coop_lives", -1))

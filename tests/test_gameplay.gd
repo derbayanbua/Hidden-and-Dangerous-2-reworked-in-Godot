@@ -107,14 +107,24 @@ func _run() -> void:
 
 	isolate_enemies(["e_gate", "e_cp1"])
 
-	# B-047: Kameraden folgen zu Missionsbeginn nicht (Standard Halten bis „Folgen“)
+	# 0.11.7 [D]: Startzustand Halten + Feuer halten ohne Befehl (Übungseinsatz); alter B-047-Stand mit --squad_start=legacy
 	var mate_start := {}
-	var all_hold := true
+	var legacy := SquadManager.start_legacy()
+	var want_roe := SquadBrain.ROE.FIRE_AT_WILL if legacy else SquadBrain.ROE.HOLD_FIRE
+	var all_start := true
 	for mm in m.squad.members:
 		if mm != hale:
 			mate_start[mm] = mm.global_position
-			all_hold = all_hold and m.squad.brain_of(mm).order == SquadBrain.Order.HOLD
-	check(all_hold, "B-047: Kameraden halten zu Missionsbeginn")
+			var sb := m.squad.brain_of(mm)
+			all_start = all_start and sb.order == SquadBrain.Order.HOLD and sb.roe == want_roe \
+				and sb.awaiting_order == not legacy
+	check(all_start, "0.11.7: Startzustand der Kameraden (Halten, %s)" % ("Feuer frei" if legacy else "Feuer halten"))
+	if not legacy:
+		await tap("order_roe")      # Befehl „Feuer frei“ – der weitere Ablauf prüft wie bisher mit feuernden Kameraden
+		var freed := true
+		for mm in mate_start:
+			freed = freed and m.squad.brain_of(mm).roe == SquadBrain.ROE.FIRE_AT_WILL and not m.squad.brain_of(mm).awaiting_order
+		check(freed, "Befehl Feuer frei hebt die Startsperre auf")
 
 	# --- Bewegung (moderne Steuerung: Normaltempo, Shift = Sprint, leise = geduckt) ---
 	var start_pos := hale.global_position
@@ -306,7 +316,7 @@ func _run() -> void:
 	for mm in mate_start:
 		if mm.alive and m.squad.brain_of(mm).order == SquadBrain.Order.HOLD:
 			stayed = maxf(stayed, mm.global_position.distance_to(mate_start[mm]))
-	check(stayed < 2.0, "B-047: ohne Folgen-Befehl bleiben Kameraden stehen", "max %.1f m" % stayed)
+	check(stayed < 2.0, "Haltende Kameraden bleiben ohne Folgen-Befehl stehen", "max %.1f m" % stayed)
 	await tap("order_follow")
 	var target_pos := hale.global_position + hale.forward() * 25.0
 	Input.action_press("run")

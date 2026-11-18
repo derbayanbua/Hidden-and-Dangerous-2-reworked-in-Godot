@@ -73,9 +73,11 @@ static func spawn(parent: Node3D, pos: Vector3, radius: float, q: int, kind: Str
 		_flash(root, radius, q)
 		parts.append("Flash")
 	var life := smoke_life + 1.5
+	var wr: WeakRef = weakref(root)      # 0.11.7: Kartenwechsel gibt root vorher frei (kein freigegebener Lambda-Capture)
 	root.get_tree().create_timer(life, false).timeout.connect(func():
-		if is_instance_valid(root):
-			root.queue_free())
+		var r = wr.get_ref()
+		if r != null and is_instance_valid(r):
+			r.queue_free())
 	return {"node": root, "parts": parts, "lifetime": life}
 
 

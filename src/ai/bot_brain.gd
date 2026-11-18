@@ -202,7 +202,8 @@ func _physics_process(delta: float) -> void:
 			if _move_target.is_finite():
 				agent.target_position = _move_target
 			if is_leader() and state != State.COMBAT and goal.is_finite():
-				nav.plan(soldier, goal, Vector3.INF, false)
+				# 0.11.7: mit Kartenwegpunkten/Versatz neu planen – bei Pendeln führt sonst dieselbe Route zurück an dieselbe Stelle
+				nav.plan(soldier, goal, Vector3.INF, true)
 			# Festgehangen: zurücksetzen und neue Route suchen (Gefecht: neue Deckung/Flanke, Mitglied: neuer Platz)
 			# Stuck: reset and look for a new route (combat: new cover/flank, member: new slot)
 			_flank_via = Vector3.INF

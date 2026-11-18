@@ -1018,9 +1018,12 @@ func _update_hold(delta: float, speed: float, aim_pitch: float, aiming: bool) ->
 	# Ganzkörperclips mit eigenen Armen (Leiter, Schwimmen, Klettern, Benutzen …): Haltungsschicht aus; Waffe weg,
 	# solange beide Hände gebraucht werden (Leiter, Schwimmen) bzw. die Hände erhoben sind (Ergeben/Gefangener)
 	var bstate: String = body.state if body else ""
-	var hide_w := body != null and body.weapon_hidden()
+	var swim := is_instance_valid(_soldier) and bool(_soldier.get("swimming"))
+	var hide_w := (body != null and body.weapon_hidden()) or swim
 	if is_instance_valid(_weapon_mesh):
 		_weapon_mesh.visible = _weapon_visible and not hide_w and not is_instance_valid(_prop)
+	if is_instance_valid(_back_vis):
+		_back_vis.visible = bstate != "swim" and not swim      # 0.11.7: beim Schwimmen ragt keine Waffe aus dem Wasser
 	if body and body.arms_free():
 		if _hold_anim.is_playing():
 			_hold_anim.stop()
@@ -1312,6 +1315,9 @@ func play_death(direction: Vector3) -> void:
 	_stop_hold()
 	_dead = true
 	_begin_ragdoll(direction, death_clip_name)
+	# 0.11.7: Waffe flach ablegen – mit Ragdoll beim Einfrieren (Ragdoll._lay_weapon), sonst/spätestens nach dem Todesclip
+	var lay_t := 10.0 if is_instance_valid(ragdoll) and ragdoll.state != Ragdoll.State.IDLE else 1.6
+	get_tree().create_timer(lay_t, false).timeout.connect(lay_weapon_flat)
 	var fall_dir := direction
 	fall_dir.y = 0
 	if fall_dir.length() < 0.1:
@@ -1365,6 +1371,59 @@ func _begin_ragdoll(direction: Vector3, clip: String) -> void:
 		delay = _orig_anim.get_animation(clip).length * 0.7    # Kehlschnitt: Original-Clip trägt den Ablauf
 	ragdoll.begin(hit, delay)
 
+
+## 0.11.7 [D]: Nach dem Einfrieren der Leiche liegt die Handwaffe flach neben der Hand auf dem Boden. Der Hand-Dummy
+## hw1 hat ohne Physikkörper in der FK-Endpose seine Ruhedrehung, die Waffe stand daran senkrecht aus der Leiche.
+## Längste Achse des Modells = Lauf (waagrecht), kürzeste = Breite (senkrecht, Waffe liegt auf der Seite).
+func lay_weapon_flat() -> void:
+	if not is_instance_valid(_weapon_mesh) or not is_instance_valid(_soldier) or not _weapon_mesh.is_inside_tree():
+		return
+	if _weapon_mesh.has_meta("laid_flat") or not _dead:
+		return
+	var box := AABB()
+	var first := true
+	var inv := _weapon_mesh.global_transform.affine_inverse()
+	for mi in _weapon_mesh.find_children("*", "MeshInstance3D", true, false):
+		if (mi as MeshInstance3D).mesh == null:
+			continue
+		var b: AABB = (inv * (mi as MeshInstance3D).global_transform) * (mi as MeshInstance3D).get_aabb()
+		box = b if first else box.merge(b)
+		first = false
+	if first or box.size.length() < 0.01:
+		return
+	var sz := box.size
+	var long_i := 0
+	var thin_i := 0
+	for i in 3:
+		if sz[i] > sz[long_i]:
+			long_i = i
+		if sz[i] < sz[thin_i]:
+			thin_i = i
+	if long_i == thin_i:
+		thin_i = (long_i + 1) % 3
+	var axes := [Vector3.RIGHT, Vector3.UP, Vector3.BACK]
+	var bl: Vector3 = axes[long_i]
+	var tl: Vector3 = axes[thin_i]
+	var gb := _weapon_mesh.global_basis
+	var wscale := gb.get_scale()
+	var center := _weapon_mesh.global_transform * box.get_center()
+	var bw := gb.orthonormalized() * bl
+	bw.y = 0.0
+	if bw.length() < 0.05:
+		bw = global_basis.x
+	bw = bw.normalized()
+	var world := Basis(bw, Vector3.UP, bw.cross(Vector3.UP))
+	var local := Basis(bl, tl, bl.cross(tl))
+	var rot := world * local.inverse()
+	var space := _weapon_mesh.get_world_3d().direct_space_state
+	var q := PhysicsRayQueryParameters3D.create(center + Vector3.UP * 0.6, center + Vector3.DOWN * 2.5, 1)
+	var h := space.intersect_ray(q)
+	var ground_y: float = h.position.y if not h.is_empty() else center.y - sz[thin_i] * 0.5
+	var basis_s := rot * Basis.from_scale(wscale)
+	var target := Vector3(center.x, ground_y + sz[thin_i] * wscale[thin_i] * 0.5 + 0.01, center.z)
+	_weapon_mesh.reparent(_soldier, false)
+	_weapon_mesh.global_transform = Transform3D(basis_s, target - basis_s * box.get_center())
+	_weapon_mesh.set_meta("laid_flat", true)
 
 ## Endpose der Leiche (leer, solange keine vorliegt)
 func corpse_pose() -> PackedFloat32Array:

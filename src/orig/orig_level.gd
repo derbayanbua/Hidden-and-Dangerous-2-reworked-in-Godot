@@ -183,7 +183,100 @@ func _ramp_links(body: Node3D, pat: String) -> void:
 			print("KLZ: Rampen-Link %s %s -> %s" % [mi.name, link.start_position, link.end_position])
 
 
+## 0.11.7: Wendeltreppen, die Recast nicht vernetzt (NORMANDY-Leuchtturm m_maj_*, 76 Tritte à 0,26 m, Radius 1,2 m,
+## 12 Tritte je Umdrehung, test_stairs T1 „Pfad✗ Ende“ – Soldaten kommen physisch hinauf). Je Tritt ein schmaler Kasten
+## von Tritt k zu k+1 NUR als Navmesh-Quelle (NAV_ONLY_LAYER, wie „navramp“), ohne den WalkPatches-Körper – sonst
+## schaltet Mission._bake_tiles die automatischen Treppen-Rampen der übrigen Karte ab. Werte aus der test_stairs-Spur [E].
+## c = Achse (y = Höhe Tritt 0), a0 = Winkel Tritt 0 (atan2(z, x), Grad), da = Winkelschritt, dy = Steigung, n = Tritte,
+## foot/top = Fuß vor Tritt 0 und Austritt nach dem letzten Tritt.
+const HELIX_PATCHES := {
+	"normandy": [{"c": Vector3(-88.1, 3.9, -98.1), "r": 1.2, "a0": 180.0, "da": -30.0, "dy": 0.2597, "n": 74,
+		"foot": Vector3(-89.0, 3.5, -99.3), "top": Vector3(-88.1, 23.1, -97.1)}],
+	"normandy_mp": [{"c": Vector3(-88.1, 3.9, -98.1), "r": 1.2, "a0": 180.0, "da": -30.0, "dy": 0.2597, "n": 74,
+		"foot": Vector3(-89.0, 3.5, -99.3), "top": Vector3(-88.1, 23.1, -97.1)}],
+}
+
+
+func _apply_helix_patches() -> void:
+	var key := mission_dir.get_file().to_lower()
+	if not HELIX_PATCHES.has(key) or Game.cli.has("nav_stair_links_off"):
+		return
+	var nb := root.get_node_or_null("NavOnlyPatches") as StaticBody3D
+	if nb == null:
+		nb = StaticBody3D.new()
+		nb.name = "NavOnlyPatches"
+		nb.collision_layer = LevelBuilder.NAV_ONLY_LAYER
+		nb.collision_mask = 0
+		root.add_child(nb)
+	for h: Dictionary in HELIX_PATCHES[key]:
+		var c: Vector3 = h["c"]
+		var pts: Array[Vector3] = [h["foot"]]
+		for k in int(h["n"]):
+			var a := deg_to_rad(float(h["a0"]) + float(h["da"]) * k)
+			# + 0,6·Steigung: Kastenoberkante liegt über den Trittkanten (sonst verdecken die gestuften Tritte die Wendel
+			# im Recast-Höhenfeld und es entsteht wieder kein Netz)
+			pts.append(Vector3(c.x + cos(a) * float(h["r"]), c.y + float(h["dy"]) * (k + 0.6), c.z + sin(a) * float(h["r"])))
+		pts.append(h["top"])
+		for i in range(1, pts.size()):
+			var a: Vector3 = pts[i - 1]
+			var b: Vector3 = pts[i]
+			var d := b - a
+			var flat := Vector3(d.x, 0, d.z)
+			if flat.length() < 0.05:
+				continue
+			var cs := CollisionShape3D.new()
+			var box := BoxShape3D.new()
+			var thick := 0.12
+			var basis := Basis(Vector3.UP, atan2(flat.x, flat.z)) * Basis(Vector3.RIGHT, -atan2(d.y, flat.length()))
+			box.size = Vector3(1.4, thick, d.length() + 0.15)    # breit (Ledge-Filter an der offenen Innenseite), leicht überlappend: lückenlose Wendel
+			cs.transform = Transform3D(basis, (a + b) * 0.5 - basis.y * thick * 0.5)
+			cs.shape = box
+			nb.add_child(cs)
+			stats["nav_ramps"] = int(stats.get("nav_ramps", 0)) + 1
+
+
+## 0.11.7: Ersatzrampen MIT Kollision (wie die versteckten Original-Ersatzrampen, B-010b) für Treppen, die Soldaten
+## physisch nicht hinaufkommen (test_stairs „hinauf✗“): CZECH1 T2 (Soldat hängt an der Setzstufe fest; hinunter jetzt
+## grün, hinauf endet am Kopfraum bei z 13,3), NORMANDY_MP T3 (Fuß blockiert → grün). ARCTIC1/3_OBJ T1/T2 nicht: dort
+## sperrt ein Hindernis direkt am Fuß (Rampe brachte nichts). Eigener Körper
+## „WalkRamps“ (nicht „WalkPatches“), damit die automatischen Treppen-Rampen der Karte erhalten bleiben. Steigung ≤ 45°;
+## steilere Läufe (CZECH4/5 T2 ≈ 50°, leiterartig) bleiben aus. Punkte = Fuß/oberster Tritt aus test_stairs [E].
+const REAL_RAMPS := {
+	"czech1": [[Vector3(-2.2, 0.0, 12.0), Vector3(-2.2, 4.5, 17.4)]],
+	"czech1_obj": [[Vector3(-2.2, 0.0, 12.0), Vector3(-2.2, 4.5, 17.4)]],
+	"normandy_mp": [[Vector3(-26.0, -0.3, -87.8), Vector3(-31.1, 2.9, -82.7)]],
+}
+
+
+func _apply_real_ramps() -> void:
+	var key := mission_dir.get_file().to_lower()
+	if not REAL_RAMPS.has(key) or Game.cli.has("nav_real_ramps_off"):
+		return
+	var body := StaticBody3D.new()
+	body.name = "WalkRamps"
+	body.collision_layer = 1
+	root.add_child(body)
+	for r: Array in REAL_RAMPS[key]:
+		var a: Vector3 = r[0]
+		var b: Vector3 = r[1]
+		var d := b - a
+		var flat := Vector3(d.x, 0, d.z)
+		if rad_to_deg(atan2(d.y, flat.length())) > 45.0:
+			continue
+		var cs := CollisionShape3D.new()
+		var box := BoxShape3D.new()
+		var thick := 0.12
+		var basis := Basis(Vector3.UP, atan2(flat.x, flat.z)) * Basis(Vector3.RIGHT, -atan2(d.y, flat.length()))
+		box.size = Vector3(0.9, thick, d.length())
+		cs.transform = Transform3D(basis, (a + b) * 0.5 - basis.y * thick * 0.5)
+		cs.shape = box
+		body.add_child(cs)
+		stats["real_ramps"] = int(stats.get("real_ramps", 0)) + 1
+
+
 func _apply_walk_patches() -> void:
+	_apply_helix_patches()
+	_apply_real_ramps()
 	var key := mission_dir.get_file().to_lower()
 	if not WALK_PATCHES.has(key):
 		return
@@ -865,18 +958,29 @@ func _index(n: Node) -> void:
 ## (Alpha-Materialien) bekommt keine Kollision.
 func _add_collision(n: Node) -> void:
 	if n is MeshInstance3D:
-		_mesh_collider(n as MeshInstance3D, true)
+		_mesh_collider(n as MeshInstance3D, true, false, false, true)
 	for c in n.get_children():
 		_add_collision(c)
 
 
 ## Gras/Wasser erfassen und (collide) Trimesh-Kollision anlegen
-func _mesh_collider(mi: MeshInstance3D, collide: bool, two_sided := false, klz_faces := false) -> void:
+func _mesh_collider(mi: MeshInstance3D, collide: bool, two_sided := false, klz_faces := false, mixed := false) -> void:
 	var foliage := mi.mesh != null and _is_foliage(mi)
 	if foliage and mi.get_aabb().size.y < 1.5 and not klz_faces:
 		grass_nodes.append(mi)
 	if klz_faces:
 		foliage = false        # Original: in tree.klz als Flächen verlinkt -> begehbar/fest, egal welches Material
+	# fix_af1_tanks: Mischmodelle (undurchsichtiger Körper + einzelne Alpha-Teile wie Leitern/Gitter, z. B. AFRICA1
+	# Treibstofftanks m_nadrz03 = ein Mesh mit 20 Flächen, 5 davon MASK) galten als „Laub“ → ganz ohne Kollision, man lief
+	# hindurch. Überwiegend undurchsichtig (≥ 50 % der Fläche) → Kollision aus den undurchsichtigen Flächen. Bäume/Büsche
+	# (Laub überwiegt) bleiben unverändert. Nur für Akteur-/Objektmodelle (_add_collision); Level-Frames folgen tree.klz
+	# (B-017: eine Ausweitung darauf sperrte den AFRICA1-Haupteingang HL_DV09). `--mixed_collision=0` = alter Stand.
+	var solid_faces := PackedVector3Array()
+	if mixed and foliage and collide and mi.mesh and String(Game.cli.get("mixed_collision", "1")) != "0":
+		solid_faces = _opaque_faces(mi.mesh)
+		if not solid_faces.is_empty():
+			foliage = false
+			stats["mixed_solid"] = int(stats.get("mixed_solid", 0)) + 1
 	if mi.mesh and not foliage and _is_water(mi, klz_faces):
 		# Wasserfläche (QuadPatch/„more“, Material VODA*/MORE*): keine Kollision, als Wasserbereich merken
 		var box: AABB = mi.global_transform * mi.get_aabb() if mi.is_inside_tree() else mi.get_aabb()
@@ -886,8 +990,24 @@ func _mesh_collider(mi: MeshInstance3D, collide: bool, two_sided := false, klz_f
 		var body := StaticBody3D.new()
 		body.collision_layer = 1
 		var cs := CollisionShape3D.new()
-		cs.shape = mi.mesh.create_trimesh_shape()
-		if mi.has_meta("klz_proxy") and not Game.cli.has("nav_proxy_flip_off"):
+		var col_boxes := _bodycol_boxes(mi) if not solid_faces.is_empty() else []
+		if not col_boxes.is_empty():
+			# Original-Kollisionskisten des Modells (4DS-Dummies „BODYCOLBnn“, Typ 6, Skalierung = halbe Kantenlänge):
+			# geschlossene Körper – ein hohles Trimesh (Tank) ergäbe innen eine begehbare Navmesh-Insel
+			for i in col_boxes.size():
+				var c2: CollisionShape3D = cs if i == 0 else CollisionShape3D.new()
+				c2.shape = col_boxes[i][0]
+				c2.transform = col_boxes[i][1]
+				if i > 0:
+					body.add_child(c2)
+			stats["bodycol"] = int(stats.get("bodycol", 0)) + 1
+		elif solid_faces.is_empty():
+			cs.shape = mi.mesh.create_trimesh_shape()
+		else:
+			var cps := ConcavePolygonShape3D.new()
+			cps.set_faces(solid_faces)
+			cs.shape = cps
+		if mi.has_meta("klz_proxy") and not Game.cli.has("nav_proxy_flip_off") and cs.shape is ConcavePolygonShape3D:
 			_orient_proxy_up(mi, cs.shape as ConcavePolygonShape3D)
 		# B-036: Kartengrenze „BORDER“ (Wände + Deckel, ARCTIC3 Deckel bei y 22,4 tiefer als die Hügel) nur einseitig –
 		# beidseitig war die Deckeloberseite begehbar, der Löser lief in a3 auf ihr kreuz und quer über die Karte
@@ -895,7 +1015,7 @@ func _mesh_collider(mi: MeshInstance3D, collide: bool, two_sided := false, klz_f
 		# bleiben beidseitig, damit niemand hinausläuft
 		var is_border := String(mi.get_path()).contains("/BORDER/") and not Game.cli.has("border_two_sided") \
 			and mi.is_inside_tree() and (mi.global_transform * mi.get_aabb()).position.y >= 10.0
-		if two_sided and not is_border:
+		if two_sided and not is_border and cs.shape is ConcavePolygonShape3D:
 			# Klz-Ebenen wirken beidseitig; versteckte Ersatzkörper sind teils nach unten orientiert (ARCTIC2 T1_strop_19)
 			(cs.shape as ConcavePolygonShape3D).backface_collision = true
 		body.add_child(cs)
@@ -932,6 +1052,62 @@ func _orient_proxy_up(mi: MeshInstance3D, shape: ConcavePolygonShape3D) -> void:
 	stats["proxy_flipped"] = int(stats.get("proxy_flipped", 0)) + 1
 	if Game.cli.has("klz_debug"):
 		print("KLZ: Ersatzkörper %s umgedreht (oben %.2f, unten %.2f)" % [mi.name, up, down])
+
+
+## Original-Kollisionskisten neben dem Mesh: 4DS-Dummies „BODYCOL*“ (Geschwister im Modell, z. B. m_nadrz03
+## BODYCOLB00–07). Rückgabe [[BoxShape3D, Transform relativ zum Mesh], …]; Kantenlänge = 2 × Dummy-Skalierung [P].
+## `--bodycol=0` = aus (Trimesh der undurchsichtigen Flächen).
+static func _bodycol_boxes(mi: MeshInstance3D) -> Array:
+	var out: Array = []
+	var p := mi.get_parent()
+	if p == null or String(Game.cli.get("bodycol", "1")) == "0":
+		return out
+	var inv := mi.transform.affine_inverse()
+	for c in p.get_children():
+		if c is Node3D and c != mi and String(c.name).to_upper().begins_with("BODYCOL"):
+			var t: Transform3D = (c as Node3D).transform
+			var sc := t.basis.get_scale().abs()
+			if minf(sc.x, minf(sc.y, sc.z)) < 0.005:
+				continue
+			var box := BoxShape3D.new()
+			box.size = sc * 2.0
+			var b := t.basis.orthonormalized()
+			if b.determinant() < 0.0:
+				b.x = -b.x         # Kiste ist symmetrisch – Spiegelung entfernen (Physik verträgt keine negative Skalierung)
+			out.append([box, inv * Transform3D(b, t.origin)])
+	return out
+
+
+## Dreiecke der undurchsichtigen Flächen eines Mischmeshes, wenn sie ≥ 50 % der Gesamtfläche ausmachen und selbst
+## räumlich sind (≥ 0,3 m in jeder Achse) – sonst leer (Mesh bleibt Laub/ohne Kollision).
+static func _opaque_faces(mesh: Mesh) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	var a_op := 0.0
+	var a_all := 0.0
+	for s in mesh.get_surface_count():
+		var m := mesh.surface_get_material(s) as BaseMaterial3D
+		var opaque := m == null or m.transparency == BaseMaterial3D.TRANSPARENCY_DISABLED
+		var arr := mesh.surface_get_arrays(s)
+		var v: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX] if arr[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
+		var n := idx.size() if not idx.is_empty() else v.size()
+		for i in range(0, n - 2, 3):
+			var p0 := v[idx[i]] if not idx.is_empty() else v[i]
+			var p1 := v[idx[i + 1]] if not idx.is_empty() else v[i + 1]
+			var p2 := v[idx[i + 2]] if not idx.is_empty() else v[i + 2]
+			var a := (p1 - p0).cross(p2 - p0).length() * 0.5
+			a_all += a
+			if opaque:
+				a_op += a
+				out.append_array([p0, p1, p2])
+	if out.is_empty() or a_all <= 0.0 or a_op < 0.5 * a_all:
+		return PackedVector3Array()
+	var b := AABB(out[0], Vector3.ZERO)
+	for p in out:
+		b = b.expand(p)
+	if minf(b.size.x, minf(b.size.y, b.size.z)) < 0.3:
+		return PackedVector3Array()
+	return out
 
 
 static func _has_area(mesh: Mesh) -> bool:

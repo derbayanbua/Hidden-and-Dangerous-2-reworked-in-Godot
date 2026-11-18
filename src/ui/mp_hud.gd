@@ -7,7 +7,8 @@ extends CanvasLayer
 ##  - Chat: „ALLE INFORMIEREN“ (T2853, Taste T) / „TEAM INFORMIEREN“ (T2854, Taste Y), Konsole (T2852, Taste ^)
 ##  - Abstimmung (HUD „voting“, T8930–8932): Anzeige, F1 = zustimmen
 ##  - Zuschauerkamera: Spieler folgen (LMT/RMT wechselt) oder frei (Leertaste umschalten, WASD + Maus)
-##  - Spawnzonen-Karte (T2525/2528, Taste M bzw. Pausenmenü): eigene Zone anklicken = Spawnzone festlegen
+##  - Spawnzonen-Karte (T2525/2528, Taste M bzw. Pausenmenü): eigene Zone anklicken = Spawnzone festlegen;
+##    0.11.7: mit Marken wie die Minikarte (MapMarks), ohne Zonen (DM/TDM) als Übersichtskarte „KARTE“
 ##  - Voice-Chat-Anzeige (eigenes Sprechen / wer spricht)
 ##  - 0.11.6 Minikarte: eigene Lage, Verbündete, kurz feuernde Gegner ohne Schalldämpfer (src/ui/mp_minimap.gd)
 
@@ -492,7 +493,8 @@ func _input(event: InputEvent) -> void:
 	elif event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).keycode == KEY_F1 \
 			and not (Net.hud_info.get("vote", {}) as Dictionary).is_empty():
 		Net.console_command("voteyes")
-	elif event.is_action_pressed("tactical_map") and _has_zones():
+	elif event.is_action_pressed("tactical_map") and (_has_zones() or (m0 != null and m0.has_method("mp_spawns"))):
+		# 0.11.7: Karte M auch ohne Spawnzonen (DM/TDM: Übersicht mit Marken wie die Minikarte)
 		toggle_zone_map()
 	elif event.is_action_pressed("fire") and Net.respawn_ready():
 		Net.request_respawn()          # „FEUER DRÜCKEN FÜR RESPAWN“ (T7406)
@@ -754,6 +756,17 @@ class ZoneMap extends Control:
 		if chosen >= 0 and centers.has(chosen) and lay.has("selectzone") and centers[chosen] != Vector2.INF:
 			var sel: Dictionary = lay["selectzone"]
 			_tris(sel, xf, xf.affine_inverse() * centers[chosen] - _r(sel).get_center())
+		# 0.11.7: Welt → Kartenbild aus den Zonenpaaren (Zonen-Ursprung ↔ Mitte der Zonenfläche), [E] Kartenbild
+		# als lineare Draufsicht angenommen
+		var wp: Array = []
+		var sp: Array = []
+		for i in centers:
+			if centers[i] != Vector2.INF:
+				var o: Vector3 = (zs[i]["xf"] as Transform3D).origin
+				wp.append(Vector2(o.x, o.z))
+				sp.append(centers[i])
+		world_xf = MapMarks.fit_affine(wp, sp)
+		marks_area = Rect2(xf * b.position, b.size * sc)
 		return true
 
 	## Punkt innerhalb der Zone i (Mitte des ersten Dreiecks) – für Tests/Tastatur
@@ -763,28 +776,75 @@ class ZoneMap extends Control:
 			return (t[0] + t[1] + t[2]) / 3.0
 		return (_rects[i] as Rect2).get_center() if _rects.has(i) else Vector2.INF
 
+	## 0.11.7: Marken wie die Minikarte (MapMarks; Sicht/Schüsse aus MpHud.minimap): eigene Lage + Blickrichtung,
+	## Verbündete (nur Team-Stile), schießende Gegner SHOT_TTL s (ohne Schalldämpfer), Zuschauer = beobachteter Spieler,
+	## freie Zuschauerkamera/tot → keine Marken
+	var world_xf := Transform2D()      ## Welt (x, z) → Panel; Determinante 0 = unbekannt (keine Marken)
+	var marks_area := Rect2()          ## Marken werden auf diese Fläche geklemmt
+	var marks_drawn := {}              ## Tests: {self: Vector2|null, allies: n, shots: n}
+
+	func _draw_marks() -> void:
+		marks_drawn = {"self": null, "allies": 0, "shots": 0}
+		var hud = get_parent().get_parent() if get_parent() else null
+		var mm = hud.get("minimap") if hud else null
+		if mm == null or not is_instance_valid(mm.center_soldier) or absf(world_xf.determinant()) < 1e-9:
+			return
+		var c: Soldier = mm.center_soldier
+		var area := marks_area.grow(-4.0)
+		var to_map := func(w: Vector3) -> Vector2:
+			var p: Vector2 = world_xf * Vector2(w.x, w.z)
+			return p.clamp(area.position, area.end)
+		var shots: Array = mm.enemy_shots()
+		for e in shots:
+			MapMarks.draw_shot(self, to_map.call(e["pos"]), e, 1.3)
+		var al: Array = mm.allies()
+		for s in al:
+			MapMarks.draw_ally(self, to_map.call(s.global_position), MapMarks.team_col(s.team), 6.0)
+		var p: Vector2 = to_map.call(c.global_position)
+		MapMarks.draw_self(self, p, world_xf.basis_xform(MapMarks.dir2(c.forward())), MapMarks.mp_self_col(c), 1.5)
+		marks_drawn = {"self": p, "allies": al.size(), "shots": shots.size()}
+
 	func _draw() -> void:
 		draw_rect(Rect2(Vector2.ZERO, size), Color(0.08, 0.07, 0.05, 0.92))
 		var font := get_theme_default_font()
-		draw_string(font, Vector2(14, 24), "%s   (%s)" % [Net.tx(2525, "KARTE DER SPAWN-ZONEN:"), Net.tx(2528, "SPAWN-ZONE FESTLEGEN")],
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 15, UIKit.ACCENT)
 		var m = Game.current_mission()
-		if m == null or not m.has_method("mp_zones"):
+		var zs: Array = m.mp_zones() if m != null and m.has_method("mp_zones") else []
+		var title := "%s   (%s)" % [Net.tx(2525, "KARTE DER SPAWN-ZONEN:"), Net.tx(2528, "SPAWN-ZONE FESTLEGEN")] \
+			if not zs.is_empty() else "KARTE"
+		draw_string(font, Vector2(14, 24), title, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, UIKit.ACCENT)
+		var hint := "Eigene Zone anklicken  –  M schließt" if not zs.is_empty() else "M schließt"
+		world_xf = Transform2D(Vector2.ZERO, Vector2.ZERO, Vector2.ZERO)
+		if m == null:
 			return
-		if _draw_orig(m.mp_zones()):
-			draw_string(font, Vector2(14, size.y - 12), "Eigene Zone anklicken  –  M schließt", HORIZONTAL_ALIGNMENT_LEFT, -1, 13,
-				Color(0.85, 0.8, 0.7))
+		if not zs.is_empty() and _draw_orig(zs):
+			_draw_marks()
+			draw_string(font, Vector2(14, size.y - 12), hint, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.85, 0.8, 0.7))
 			return
-		var zs: Array = m.mp_zones()
 		var lo := Vector2(INF, INF)
 		var hi := Vector2(-INF, -INF)
+		var pts: Array = []
 		for z in zs:
-			var o: Vector3 = (z["xf"] as Transform3D).origin
+			pts.append((z["xf"] as Transform3D).origin)
+		if zs.is_empty() and m.has_method("mp_spawns"):   # 0.11.7: ohne Zonen (DM/TDM) Ausschnitt = Spawnpunkte
+			for sp in m.mp_spawns():
+				pts.append(sp["pos"])
+		for o: Vector3 in pts:
 			lo = lo.min(Vector2(o.x, o.z))
 			hi = hi.max(Vector2(o.x, o.z))
+		if pts.is_empty():
+			return
+		if zs.is_empty():
+			lo -= Vector2(20, 20)
+			hi += Vector2(20, 20)
 		var area := Rect2(30, 44, size.x - 60, size.y - 90)
 		var span := (hi - lo).max(Vector2(1, 1))
 		var sc := minf(area.size.x / span.x, area.size.y / span.y)
+		world_xf = Transform2D(0.0, Vector2(sc, sc), 0.0, area.position + (area.size - span * sc) * 0.5 - lo * sc)
+		marks_area = area
+		if zs.is_empty():
+			draw_rect(area, Color(0.85, 0.8, 0.6, 0.35), false, 1.0)
+			draw_string(font, Vector2(area.get_center().x - 4, area.position.y + 14), "N", HORIZONTAL_ALIGNMENT_LEFT, -1, 12,
+				Color(0.9, 0.85, 0.65))
 		var my_team := int(Net.players.get(Net.my_id(), {}).get("team", -1))
 		var chosen := int(Net.players.get(Net.my_id(), {}).get("zone", -1))
 		_rects.clear()
@@ -801,7 +861,8 @@ class ZoneMap extends Control:
 				draw_arc(p, r + 2, 0, TAU, 24, UIKit.ACCENT, 2)
 				_rects[i] = Rect2(p - Vector2(r, r), Vector2(r, r) * 2)
 			draw_string(font, p + Vector2(-40, r + 16), String(zs[i]["text"]).substr(0, 18), HORIZONTAL_ALIGNMENT_CENTER, 80, 11, Color.WHITE)
-		draw_string(font, Vector2(14, size.y - 14), "Eigene Zone anklicken  –  M schließt", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.85, 0.8, 0.7))
+		_draw_marks()
+		draw_string(font, Vector2(14, size.y - 14), hint, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.85, 0.8, 0.7))
 
 	func _gui_input(event: InputEvent) -> void:
 		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:

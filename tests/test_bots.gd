@@ -401,7 +401,13 @@ func _tactic_spacing(grp: Array) -> void:
 	nn_all.sort()
 	var med: float = nn_all[nn_all.size() / 2] if not nn_all.is_empty() else 0.0
 	var frac := float(near) / maxf(samples, 1)
-	var arrived := BotNav.flat(lead.soldier.global_position, lead.test_goal) < 4.0
+	# Der Führer hält nach dem Erreichen (BotBrain._mark_reached, < 2,5 m) einen Halteplatz 2–10 m um das Ziel
+	# (_hold_in_area rmin/rmax für Zielart „test“) → Erreichen über das Ziel-Protokoll, Endlage innerhalb des Halteradius
+	var reached_t := -1.0
+	for e in lead.goal_log:
+		if String(e["kind"]) == "test":
+			reached_t = maxf(reached_t, float(e["reach_t"]))
+	var arrived := reached_t >= 0.0 and BotNav.flat(lead.soldier.global_position, lead.test_goal) <= 10.5
 	var hold_d: Array = []
 	for b in grp:
 		hold_d.append(snappedf(BotSquad.nearest_mate(b), 0.1))
@@ -579,6 +585,10 @@ func _phase_nav() -> void:
 	var ok_obj := results.filter(func(r): return r.get("mode", -1) == Net.Mode.OBJECTIVES and r.get("pass", false) and String(r.get("id", "")).begins_with("mp_")).size()
 	check(ok_occ >= 3, "Besetzung: Zielerreichung auf ≥ 3 Original-MP-Karten", "%d Karten" % ok_occ)
 	check(ok_obj >= 3, "HD2-Aufgaben: Zielerreichung auf ≥ 3 Original-MP-Karten", "%d Karten" % ok_obj)
+	# 0.11.7 (P2): Laufwege nicht stur gerade – Routen über Kartenwegpunkte mit Versatz, verschiedene Wegpunkte je Karte
+	var varied := results.filter(func(r): return int(r.get("human", 0)) >= 2 and int(r.get("vias", 0)) >= 2).size()
+	check(String(Game.cli.get("bot_human", "1")) == "0" or varied * 2 >= results.size(),
+		"Laufwege variieren (Kartenwegpunkte + Versatz) auf ≥ der Hälfte der Karten", "%d/%d Karten" % [varied, results.size()])
 
 
 ## Eine Seite (ohne Gegner, reine Wegfindung) läuft dur s Spielzeit: Zielquote, Zeiten, längstes Festhängen
@@ -620,6 +630,8 @@ func _nav_round(map: String, mode: int, n: int, dur: float) -> Dictionary:
 	var idle_max := 0.0
 	var logs := {}
 	var nud := {}
+	var hroutes := {}
+	var hvias := {}
 	var stuck_n := {}
 	var ended := ""
 	var t := 0.0
@@ -650,6 +662,9 @@ func _nav_round(map: String, mode: int, n: int, dur: float) -> Dictionary:
 			# Verlauf je Bot sichern (bei Rundenende werden die KI-Soldaten neu erzeugt)
 			logs[s.soldier_name] = b.goal_log.duplicate(true)
 			nud[s.soldier_name] = b.nav.nudges
+			hroutes[s.soldier_name] = b.nav.human_routes
+			for v in b.nav.human_vias:
+				hvias[str(v.snapped(Vector3.ONE * 4.0))] = true
 			stuck_n[s.soldier_name] = float(stuck.get(s, 0.0))
 		if Net.match_over:
 			ended = "Runde gewonnen nach %.0f s" % t
@@ -673,7 +688,9 @@ func _nav_round(map: String, mode: int, n: int, dur: float) -> Dictionary:
 	for nm in logs:
 		nudges += int(nud[nm])
 		max_stuck = maxf(max_stuck, float(stuck_n[nm]))
-		var glog: Array = (logs[nm] as Array).filter(func(e): return float(e["dist"]) > 5.0)
+		# 0.11.7: „hunt“ (Gegnersuche) zählt nicht – in dieser Runde ist die Gegenseite geparkt, es gibt nichts zu finden
+		# (mp_africa3_obj: nach der erledigten eigenen Aufgabe nur noch Gegnersuche → 4 „offene“ Ziele, Quote 43 %)
+		var glog: Array = (logs[nm] as Array).filter(func(e): return float(e["dist"]) > 5.0 and String(e["kind"]) != "hunt")
 		for k in glog.size():
 			var e: Dictionary = glog[k]
 			if float(e["reach_t"]) >= 0.0:
@@ -700,6 +717,10 @@ func _nav_round(map: String, mode: int, n: int, dur: float) -> Dictionary:
 	var line := "%s (%s, %d Bots, %.0f s): Ziele erreicht %d, offen %d, abgelöst %d → Quote %.0f %%, erstes Ziel %d/%d, Zeit Ø %.0f s / max %.0f s, längstes Festhängen %.1f s, längster Stillstand vor dem Ziel %.1f s, Netz-Korrekturen %d, %s%s" % [
 		map, "Besetzung" if mode == Net.Mode.OCCUPATION else "Aufgaben", active.size(), dur, reached, open, superseded, quote * 100.0,
 		first_ok, active.size(), mean, float(times[times.size() - 1]) if not times.is_empty() else 0.0, max_stuck, idle_max, nudges, extra, (", " + ended) if ended != "" else ""]
+	var hr_sum := 0
+	for nm in hroutes:
+		hr_sum += int(hroutes[nm])
+	line += ", Laufwege mit Wegpunkt/Versatz %d, verschiedene Kartenwegpunkte %d" % [hr_sum, hvias.size()]
 	print("NAVMESS ", line)
 	if worst != "":
 		print("   FESTHÄNGEN: ", worst)
@@ -709,7 +730,7 @@ func _nav_round(map: String, mode: int, n: int, dur: float) -> Dictionary:
 	check(max_stuck <= STUCK_LIMIT, "%s: kein KI-Soldat > %.0f s festgehängt" % [map, STUCK_LIMIT],
 		"max. fest %.1f s; Zielquote %.0f %% (%d erreicht)%s" % [max_stuck, quote * 100.0, reached, "" if pass_ok else " – Quote unter 75 %"])
 	await _leave()
-	return {"mode": mode, "pass": pass_ok, "id": map}
+	return {"mode": mode, "pass": pass_ok, "id": map, "human": hr_sum, "vias": hvias.size()}
 
 
 # --- Gefechtsrunde (beide Teams) --------------------------------------------------------------------

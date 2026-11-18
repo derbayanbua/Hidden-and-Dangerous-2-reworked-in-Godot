@@ -67,6 +67,7 @@ func _run() -> void:
 		target.health = target.max_health
 	player.skill_shooting = 100.0
 	player.stamina = 100.0
+	Settings.scope_zero = false          # 0.11.7: hier wird die Originalbahn ohne Ausgleich geprüft (Schießstand prüft den Ausgleich)
 	var ph := String(Game.cli.get("phase", "all")).split(",")
 	if "all" in ph or "darstellung" in ph:
 		await phase_display(self, m, player, "SP")

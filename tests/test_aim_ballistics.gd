@@ -29,6 +29,7 @@ func _run() -> void:
 		return
 	await seconds(1.5)
 	player = m.squad.leader()
+	Settings.scope_zero = false          # 0.11.7: Original ohne Zielfernrohr-Ausgleich (Ausgleich prüft test_range)
 	var ph := String(Game.cli.get("phase", "all"))
 	if ph in ["all", "bahn"]:
 		_phase_path()
@@ -144,11 +145,34 @@ func _phase_recoil() -> void:
 	s.skill_shooting = 100.0
 	s.aiming = false
 	# Faktoren je Waffenart: MP 0,3 / Pistole 0,8 / Gewehr 0,4 / ZF-Gewehr 1,0 / Sturmgewehr 0,5
-	var rows := [[&"mp40", 0.3], [&"colt", 0.8], [&"kar98k", 0.4], [&"o_13", 0.4], [&"stg44", 0.5], [&"bren", 0.4]]
+	# 0.11.7 (B-051) [B]: Art = items.sav Typfeld (0x7E0530), ZF-Gewehr 1,0 (0x5454D0 Fall 4), Side by Side Art 3
+	var scope_old := String(Game.cli.get("recoil_scope", "1")) == "0"
+	var rows := [[&"mp40", 0.3], [&"colt", 0.8], [&"kar98k", 0.4], [&"o_13", 0.4 if scope_old else 1.0],
+		[&"stg44", 0.5], [&"bren", 0.4], [&"o_23", 0.3], [&"o_28", 0.5], [&"o_19", 0.4]]
+	# KI-Waffenklasse (0x7E0520): MP 1, Pistole 2, Gewehr/MP 44 3, MG/BAR 4
+	var OrigAiAim = load("res://src/ai/orig_ai_aim.gd")
+	for crow in [[&"mp40", 1], [&"colt", 2], [&"kar98k", 3], [&"stg44", 3], [&"bren", 4], [&"o_28", 4]]:
+		var cw := Weapon.new(WeaponDB.get_weapon(crow[0]))
+		var got: int = OrigAiAim.weapon_class(cw)
+		check(got == int(crow[1]), "R KI-Waffenklasse %s = %d" % [crow[0], crow[1]], "%d" % got)
 	for row in rows:
 		var wd := WeaponDB.get_weapon(row[0])
 		check(absf(WeaponDB.recoil_kind_factor(wd) - float(row[1])) < 1e-4, "R Faktor %s = %.1f" % [row[0], row[1]],
 			"%.2f (Art %d)" % [WeaponDB.recoil_kind_factor(wd), WeaponDB.recoil_kind(wd)])
+	# B-051 [B]: IllFire-Geschosse (Geschoss +0x6C) fliegen durch Akteure
+	var n0: int = Ballistics._projectiles.size()
+	s.set_meta("illfire_shots", true)
+	Ballistics.fire(s, s.global_position + Vector3.UP * 1.5, Vector3.FORWARD, WeaponDB.get_weapon(&"kar98k"), [], s.team)
+	var pa: bool = Ballistics._projectiles[n0].pass_actors if Ballistics._projectiles.size() > n0 else false
+	s.set_meta("illfire_shots", false)
+	Ballistics.fire(s, s.global_position + Vector3.UP * 1.5, Vector3.FORWARD, WeaponDB.get_weapon(&"kar98k"), [], s.team)
+	var pb: bool = Ballistics._projectiles[-1].pass_actors
+	Ballistics._projectiles.resize(n0)
+	var want := String(Game.cli.get("illfire_pass", "1")) != "0"
+	check(pa == want and not pb, "R IllFire-Geschoss fliegt durch Akteure (0x44B910 +0x6C)", "%s/%s" % [pa, pb])
+	var hbs := s.find_children("*", "Hitbox", true, false)
+	check(hbs.size() > 0 and Ballistics._is_actor_hit(hbs[0]) and not Ballistics._is_actor_hit(null),
+		"R Trefferzone zählt als Akteur", "%d" % hbs.size())
 	var w := s.current_weapon()
 	var r0 := s.orig_recoil_strength(w)
 	check(absf(r0 - 0.1 * 0.3 * dk) < 1e-4, "R Stärke MP 40 bereit, ausgeruht", "%.4f (Stufe %d)" % [r0, diff])

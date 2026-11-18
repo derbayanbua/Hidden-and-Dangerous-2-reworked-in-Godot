@@ -143,7 +143,7 @@ func _phase_table() -> void:
 	var k98 := WeaponDB.get_weapon(&"kar98k")
 	var mp40 := WeaponDB.get_weapon(&"mp40")
 	var p08 := WeaponDB.get_weapon(&"p08")
-	check(_near(WeaponDB.bullet_damage(k98, 75.0), 48.8) and _near(WeaponDB.bullet_damage(k98, 175.0), 33.8), "K98k: voll bis 75 m, 100 m später −15", "%.1f" % WeaponDB.bullet_damage(k98, 175.0))
+	check(_near(WeaponDB.bullet_damage(k98, 75.0), 48.8) and _near(WeaponDB.bullet_damage(k98, 175.0), 41.3) and _near(WeaponDB.bullet_damage(k98, 600.0), 29.28), "K98k: voll bis 75 m, 100 m später −7,5 [D], Untergrenze 60 %", "%.1f" % WeaponDB.bullet_damage(k98, 175.0))
 	check(_near(WeaponDB.bullet_damage(mp40, 60.0), 17.5) and WeaponDB.bullet_damage(mp40, 100.0) == 0.0, "MP 40: 60 m → 17,5; ab 92 m kein Schaden")
 	check(WeaponDB.bullet_damage(p08, 40.0) == 0.0 and _near(WeaponDB.bullet_damage(p08, 20.0), 23.0), "P08: 20 m → 23; 40 m → 0")
 	check(_near(WeaponDB.zone_damage(48.8, &"head"), 244.0) and _near(WeaponDB.zone_damage(48.8, &"torso"), 48.8)

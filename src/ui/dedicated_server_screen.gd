@@ -31,6 +31,8 @@ const RULE_LABELS := {
 	"precise_aim": "PRÄZISES ZIELEN",
 	"day_start_h": "TAGESZEIT START [h]", "day_cycle_min": "TAGESZYKLUS [min] (0 = fest)",
 	"day_night": "TAG/NACHT (ALLE KARTEN)", "dn_start_h": "T/N START [h] (-1 = Karte)", "dn_cycle_min": "T/N ZYKLUS [min]",
+	"dn_modes": "T/N MODI (1 DM 2 TDM 4 BES 8 AUFG 16 COOP)",
+	"minimap": "MINIKARTE (STATT KOMPASS)",
 }
 ## Reiter wie die Original-Dialoge; nicht genannte Regeln landen unter ERGÄNZUNGEN
 const TAB_RULES := {

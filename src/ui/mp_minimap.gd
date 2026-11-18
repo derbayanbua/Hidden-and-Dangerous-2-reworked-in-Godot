@@ -1,5 +1,6 @@
 extends Control
-## 0.11.6 Mehrspieler-Minikarte (rechts am Rand, genordet, Mitte = eigene Figur bzw. beobachteter Spieler).
+## 0.11.6 Mehrspieler-Minikarte (0.11.7: Server-Regel „minimap“, Standard aus; an = links unten über der Truppleiste
+## statt Kompass; genordet, Mitte = eigene Figur bzw. beobachteter Spieler).
 ## [D] Eigene Vorgabe: Das Original-HD2 hat im MP-HUD keine Minikarte (nur Kompass mit Kameradenpunkten kul_us,
 ## OrigHud._update_compass_dots, und die Spawnzonen-Karte M) – nicht weiter in hd2.exe gesucht.
 ##  - eigene Position + Blickrichtung (Pfeil) immer
@@ -10,90 +11,71 @@ extends Control
 ##  - Zuschauer: Sicht des beobachteten Spielers (dessen Team); freie Kamera → Karte aus
 ## Datenquelle nur lokal vorhandene Netzfiguren (Net._soldiers) und das lokale Schussgeräusch Events.noise_emitted
 ## (kind „gunshot“, auch für Netzschüsse aus Net._do_act) – keine neuen RPCs, Protokoll unverändert.
+## 0.11.7: Schussprotokoll, Sichtregeln und Marken liegen gemeinsam in src/ui/map_marks.gd (MapMarks); die große
+## MP-Karte M (MpHud.ZoneMap) liest Sicht und Schüsse von hier, die SP-Karte M (TacticalMap) nutzt MapMarks direkt.
 
 const RANGE_M := 60.0              ## Kartenradius in Metern
-const SHOT_TTL := 2.5              ## Sichtbarkeit eines Schusses [s]
-const SILENCED_RADIUS := 20.0
-const COL_ALLIED := Color(0.45, 0.7, 1.0)
-const COL_AXIS := Color(0.95, 0.85, 0.35)
-const COL_ENEMY := Color(1.0, 0.25, 0.2)
-const COL_SELF := Color(1, 1, 1)
+const SHOT_TTL := MapMarks.SHOT_TTL               ## Sichtbarkeit eines Schusses [s]
+const SILENCED_RADIUS := MapMarks.SILENCED_RADIUS
 
-var shots: Array = []              ## [{pos: Vector3, t: float, src: Soldier}] (Tests)
-var center_soldier: Soldier        ## Mitte der Karte (Tests)
+var marks := MapMarks.new()
+var shots: Array:                  ## [{pos: Vector3, t: float, src: Soldier}] (Tests)
+	get: return marks.shots
+var center_soldier: Soldier        ## Mitte der Karte (Tests; auch Sicht der großen MP-Karte)
 var view_team := -1
+const MARGIN := 10.0
+const BAR_TOP_FRAC := 0.89078     ## Oberkante tabl01/soldier00 (gameinterface.4ds, Anteil der Bildhöhe)
+
+
+## Oberkante der Truppleiste in Bildschirmpunkten: Original-HUD-Feld tabl01, sonst Anteil wie im Original
+func squad_bar_top(h: float) -> float:
+	var m = Game.current_mission()
+	var oh = m.hud.get("orig_hud") if m is Mission and m.hud else null
+	if oh and is_instance_valid(oh):
+		for nm in ["tabl01", "soldier00"]:
+			if oh.elements.has(nm) and oh.elements[nm].has("screen"):
+				return (oh.elements[nm]["screen"] as Rect2).position.y
+	return h * BAR_TOP_FRAC
 
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	Events.noise_emitted.connect(_on_noise)
+	marks.connect_noise()
+
+
+func _exit_tree() -> void:
+	marks.disconnect_noise()
 
 
 static func is_silenced_noise(radius: float, wd: WeaponData = null) -> bool:
-	if wd and String(wd.sound).begins_with("silenced"):
-		return true
-	return radius < SILENCED_RADIUS
-
-
-func _on_noise(pos: Vector3, radius: float, source: Node, _team: int, kind: StringName) -> void:
-	if kind != &"gunshot" or not (source is Soldier):
-		return
-	var s := source as Soldier
-	var w = s.current_weapon() if s.has_method("current_weapon") else null
-	if is_silenced_noise(radius, w.data if w else null):
-		return
-	shots.append({"pos": pos, "t": SHOT_TTL, "src": s})
-	if shots.size() > 64:
-		shots.pop_front()
+	return MapMarks.is_silenced_noise(radius, wd)
 
 
 ## Lebende Verbündete des Betrachters (ohne ihn selbst)
 func allies() -> Array:
-	var out: Array = []
-	if not Net.team_mode() or not is_instance_valid(center_soldier):
-		return out
-	for id in Net._soldiers:
-		var s: Soldier = Net._soldiers[id]
-		if is_instance_valid(s) and s != center_soldier and s.alive and s.team == view_team:
-			out.append(s)
-	return out
+	return MapMarks.mp_allies(center_soldier, view_team)
 
 
 ## Sichtbare Gegner-Schussmarken (Quelle ist nicht verbündet und nicht der Betrachter)
 func enemy_shots() -> Array:
-	var out: Array = []
-	for e in shots:
-		var s = e["src"]
-		if is_instance_valid(s) and (s == center_soldier or (Net.team_mode() and s.team == view_team)):
-			continue
-		out.append(e)
-	return out
-
-
-func _pick_center() -> Soldier:
-	var hud = get_parent().get_parent() if get_parent() else null
-	if hud and hud.get("spectating"):
-		if hud.spec_free:
-			return null
-		return Net._soldiers.get(hud.spec_target_id)
-	var me: Soldier = Net._soldiers.get(Net.my_id())
-	return me if is_instance_valid(me) and me.alive else null
+	return marks.enemy_shots(center_soldier, view_team, Net.team_mode())
 
 
 func _process(delta: float) -> void:
-	for i in range(shots.size() - 1, -1, -1):
-		shots[i]["t"] = float(shots[i]["t"]) - delta
-		if float(shots[i]["t"]) <= 0.0:
-			shots.remove_at(i)
+	marks.tick(delta)
 	var root := get_parent() as Control
 	if root:
 		var h := root.size.y
 		var d := clampf(h * 0.24, 120.0, 320.0)
 		size = Vector2(d, d)
-		position = Vector2(root.size.x - d - 12.0, h * 0.30)
-	center_soldier = _pick_center()
-	visible = Net.is_online and is_instance_valid(center_soldier)
-	view_team = center_soldier.team if visible else -1
+		# 0.11.7: links unten, unmittelbar über der Truppleiste (Spielersymbole), an der Stelle des Kompasses links
+		var bar_top := squad_bar_top(h)
+		position = Vector2(MARGIN, maxf(MARGIN, bar_top - d - MARGIN))
+	center_soldier = MapMarks.mp_center(root.get_parent() if root else null)
+	# Betrachterteam auch bei ausgeschalteter Minikarte (die große Karte M nutzt dieselbe Sicht)
+	view_team = center_soldier.team if is_instance_valid(center_soldier) else -1
+	# 0.11.7: Server-Regel „minimap“ (Standard aus); an → ersetzt den Kompass (hud.gd/OrigHud.compass_hidden)
+	visible = Net.minimap_enabled() and is_instance_valid(center_soldier)
 	if visible:
 		queue_redraw()
 
@@ -107,10 +89,6 @@ func map_point(world: Vector3) -> Vector2:
 	return Vector2(r, r) + v
 
 
-func _team_col(team: int) -> Color:
-	return COL_AXIS if team == Soldier.TEAM_AXIS else COL_ALLIED
-
-
 func _draw() -> void:
 	if not is_instance_valid(center_soldier):
 		return
@@ -122,17 +100,7 @@ func _draw() -> void:
 	draw_string(get_theme_default_font(), c + Vector2(-4, -r + 14), "N", HORIZONTAL_ALIGNMENT_LEFT, -1, 12,
 		Color(0.9, 0.85, 0.65))
 	for e in enemy_shots():
-		var a := clampf(float(e["t"]) / SHOT_TTL, 0.0, 1.0)
-		var p := map_point(e["pos"])
-		draw_circle(p, 5.0, Color(COL_ENEMY, a))
-		draw_arc(p, 5.0 + (1.0 - a) * 6.0, 0, TAU, 16, Color(COL_ENEMY, a * 0.6), 1.5)
+		MapMarks.draw_shot(self, map_point(e["pos"]), e)
 	for s in allies():
-		draw_circle(map_point(s.global_position), 4.5, _team_col(s.team))
-	# eigene Lage + Blickrichtung (forward = (−sin yaw, 0, −cos yaw) → Karte x = fw.x, y = fw.z)
-	var fw := center_soldier.forward()
-	var f := Vector2(fw.x, fw.z).normalized()
-	if f == Vector2.ZERO:
-		f = Vector2.UP
-	var side := Vector2(-f.y, f.x)
-	var col := COL_SELF if Net.mode() == Net.Mode.DEATHMATCH else _team_col(center_soldier.team).lightened(0.4)
-	draw_colored_polygon(PackedVector2Array([c + f * 9.0, c - f * 5.0 + side * 5.5, c - f * 2.0, c - f * 5.0 - side * 5.5]), col)
+		MapMarks.draw_ally(self, map_point(s.global_position), MapMarks.team_col(s.team))
+	MapMarks.draw_self(self, c, MapMarks.dir2(center_soldier.forward()),MapMarks.mp_self_col(center_soldier))

@@ -187,6 +187,7 @@ func _errors() -> void:
 func _login_tests() -> void:
 	var dir := "user://test_master_client/acc"
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(dir.path_join("account.json")))
+	M.auto_soldier = false          # Anfragezählung unten deterministisch; Soldatenprofil separat in _soldier_tests
 	var ok: bool = await M.login({"name": "Tester" + String.chr(0x200B), "dir": dir, "rank": 9})
 	check(ok, "Login nach automatischer Bindung")
 	check(mock.accounts.size() == 1, "GUID-Box vom Mock geöffnet und geprüft")
@@ -200,11 +201,56 @@ func _login_tests() -> void:
 	var n0: int = mock.log.size()
 	check(await M.login({"dir": dir}), "Zweites Login ohne Bindung")
 	check(mock.log.size() - n0 == 1 and String(mock.log[-1]["path"]).ends_with("/login"), "nur eine Anfrage")
+	await _soldier_tests(dir)
 	mock.fail_next = {"/v1/accounts/login": [403, "GUID_BANNED"]}
 	check(not await M.login({"dir": dir}) and _sig["login"][0] == false and _sig["login"][1]["code"] == "GUID_BANNED", "Gesperrtes Konto → login_done(false)")
 	var st: Dictionary = await M.fetch_rank(M.account["guid_hash"])
 	check(st.get("rank") == 7 and M.rank_of(M.account["guid_hash"]) == 7, "Rang per GET …/stats")
 	check((await M.fetch_rank("../x")).is_empty(), "Ungültiger guid_hash abgewiesen")
+
+
+## 0.11.7: Soldatenprofil-Upload (PUT /v1/accounts/me/soldiers/{id}, Umschlag DH2/v1/soldier, rev-Locking)
+func _soldier_tests(dir: String) -> void:
+	var net = get_node("/root/Net")
+	var cls0: int = net.local_class
+	var fig0: String = net.local_figure
+	net.local_class = 1
+	net.local_figure = "mp:42"
+	var sid: String = M.soldier_id()
+	check(RegEx.create_from_string("^[A-Za-z0-9_-]{16}$").search(sid) != null, "soldier_id 16 Zeichen b64url", sid)
+	check(await M.sync_soldier(), "Soldatenprofil hochgeladen")
+	var so: Dictionary = mock.soldiers.get(sid, {})
+	check(so.get("rev") == 1 and so.get("gh") == M.account["guid_hash"] and so.get("figure") == 42 and so.get("name") == "Tester"
+		and int(so.get("data", {}).get("class", -1)) == 1 and so.get("side") == null, "Mock: Profil mit Kontoschlüssel geprüft (rev 1)", str(so))
+	var n0: int = mock.soldier_puts
+	check(await M.sync_soldier() and mock.soldier_puts == n0, "Unverändert → kein erneuter Upload")
+	net.local_class = 5
+	check(await M.sync_soldier() and mock.soldiers[sid]["rev"] == 2 and int(mock.soldiers[sid]["data"]["class"]) == 5,
+		"Änderung → Upload mit rev 2")
+	M._soldier_rev = 0                # veralteter Stand → 409 → GET (Bearer) → erneut
+	check(await M.sync_soldier(true) and mock.soldiers[sid]["rev"] == 3, "409 CONFLICT → Stand per GET geholt, erneut gespeichert")
+	check(mock.log.any(func(e): return e["path"] == "/v1/accounts/me/soldiers" and e["method"] == "GET"), "GET …/soldiers mit Sitzung")
+	# Automatisch nach dem Login / automatically after login
+	M.auto_soldier = true
+	n0 = mock.soldier_puts
+	check(await M.login({"dir": dir}), "Login (automatischer Profil-Upload)")
+	var t0 := Time.get_ticks_msec()
+	while mock.soldier_puts == n0 and Time.get_ticks_msec() - t0 < 10000:
+		await get_tree().process_frame
+	check(mock.soldier_puts == n0 + 1 and mock.soldiers[sid]["rev"] == 4, "Nach Login automatisch hochgeladen", str(mock.soldier_puts - n0))
+	while M._soldier_busy:
+		await get_tree().process_frame
+	# Profiländerung → automatische Abfrage (SOLDIER_POLL_S) lädt hoch
+	net.local_figure = "mp:31"
+	t0 = Time.get_ticks_msec()
+	while mock.soldiers[sid]["figure"] != 31 and Time.get_ticks_msec() - t0 < 15000:
+		await get_tree().process_frame
+	check(mock.soldiers[sid]["figure"] == 31, "Profiländerung automatisch übertragen")
+	while M._soldier_busy:
+		await get_tree().process_frame
+	M.auto_soldier = false
+	net.local_class = cls0
+	net.local_figure = fig0
 
 
 func _server_tests() -> void:

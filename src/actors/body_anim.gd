@@ -219,7 +219,7 @@ func stop_oneshot() -> void:
 func arms_free() -> bool:
 	if oneshot != "" and oneshot_arms:
 		return true
-	if seat in ["drive", "motorbike"]:
+	if seat in ["drive", "motorbike", "gunner"]:
 		return true
 	return state in ["ladder", "swim", "climb", "captive_tied", "wounded_lie", "sit", "turk"]
 
@@ -227,7 +227,7 @@ func arms_free() -> bool:
 func weapon_hidden() -> bool:
 	if oneshot != "" and oneshot_arms and oneshot_kind in ["use", "activity", "sit"]:
 		return true          # Benutzen/Aufheben/Sprengsatz/Tätigkeit: beide Hände frei (Waffe am Rücken gedacht) [D]
-	if act_upper != "" or seat in ["drive", "motorbike"]:
+	if act_upper != "" or seat in ["drive", "motorbike", "gunner"]:
 		return true
 	return state in ["ladder", "swim", "surrender", "captive", "captive_tied", "wounded_lie", "sit", "turk"]
 
@@ -342,6 +342,19 @@ func update(delta: float, s, stance: int, speed: float, lean: float, basis: Basi
 			state = "vehicle"
 			return {"clip": full(seat), "rate": 1.0, "blend": 0.25}
 		seat = ""
+	# 0.11.7: Bordschützensitz ohne Fahrzeug (AFRICA6 Ju 88, Af6.Turret): Sitzclip des Stands, Arme/Waffe aus
+	var mnt = s.get("mounted")
+	if mnt is Node and is_instance_valid(mnt) and alive and mnt.has_method("gunner_seat_clip"):
+		var gk := full(String(mnt.gunner_seat_clip()))
+		if gk != "" and has(gk):
+			seat = "gunner"
+			last_stance = stance
+			seated = ""
+			stop_activity()
+			if oneshot != "":
+				stop_oneshot()
+			state = "vehicle"
+			return {"clip": gk, "rate": 1.0, "blend": 0.25}
 	# Haltungswechsel
 	if last_stance >= 0 and stance != last_stance and alive:
 		var key: String = TRANSITIONS.get("%d%d" % [last_stance, stance], "")

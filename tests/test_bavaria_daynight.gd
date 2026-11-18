@@ -45,7 +45,8 @@ func _run() -> void:
 func _rooms(m: Mission) -> void:
 	var rl = m.room_lighting
 	var inventory: Array = rl.collect_rooms()
-	check(inventory.size() >= 155, "Raumliste aus dem Bau vollständig erfasst: %d Räume" % inventory.size())
+	# ≥ 150: die breitere Blickschneise zum näher gerückten Dorf lässt ein Kulissen-Randhaus (5 Räume) entfallen
+	check(inventory.size() >= 150, "Raumliste aus dem Bau vollständig erfasst: %d Räume" % inventory.size())
 	check(rl.coverage.size() == inventory.size(), "Je Raum genau eine Leuchte (%d Leuchten / %d Räume)" % [rl.coverage.size(), inventory.size()])
 	var keys := {}
 	for c in rl.coverage:

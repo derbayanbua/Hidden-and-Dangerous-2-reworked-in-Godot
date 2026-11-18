@@ -8,6 +8,11 @@ extends Node3D
 ## Knotens an und erhalten 10 Hz den Zustand (Winkel/Modus je Kopf). Kein neues Netzprotokoll (DH2-LAN-6 bleibt):
 ## wie der Tageszyklus nur Knoten-RPCs. Ohne Serverdaten (älterer Server) rechnet der Client selbst mit den ihm
 ## bekannten Figurenlagen und der synchronen Tageszeit.
+## Strom (11/2026): Schalter am Turmfuß (`switch_on`, Standard AN = bisheriges Verhalten „nachts an“) und Stromausfall über
+## den Sicherungskasten im MG42-Haus (`outage_left` s). Licht nur nachts UND Schalter an UND kein Ausfall. Gesetzt/abgeglichen
+## wird beides vom Knoten „StollenTechnik“ (bunker_extras.gd).
+
+signal outage_ended
 
 const PLATFORM_Y := 7.0
 const HEAD_Y := 8.15
@@ -29,6 +34,11 @@ var _t := 0.0
 var _sync_t := 0.0
 var _subscribers := {}
 var _remote_t := -1.0            ## Client: Zeit seit dem letzten Serverstand (< 0 = nie)
+var switch_on := true            ## Schalter am Turmfuß
+var outage_left := 0.0           ## Restdauer Stromausfall (Sicherungskasten), s
+
+func power_ok() -> bool:
+	return switch_on and outage_left <= 0.0
 
 class Head:
 	extends Node3D
@@ -280,7 +290,11 @@ func _physics_process(delta: float) -> void:
 	if heads.is_empty():
 		return
 	_t += delta
-	var want := night_level() >= 0.5
+	if outage_left > 0.0:
+		outage_left = maxf(0.0, outage_left - delta)
+		if outage_left <= 0.0:
+			outage_ended.emit()
+	var want := night_level() >= 0.5 and power_ok()
 	if want != active:
 		_set_active(want)
 	var remote := not is_authority() and _remote_t >= 0.0 and _remote_t < 1.5

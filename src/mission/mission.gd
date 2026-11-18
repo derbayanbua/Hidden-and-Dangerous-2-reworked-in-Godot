@@ -163,6 +163,9 @@ func _ready() -> void:
 		area_guard.setup(self)
 
 	squad.set_active(0)
+	# 0.11.7: Startzustand der Kameraden (Folgen + Feuer frei) nur Einzelspieler-Originalmissionen/Übungseinsätze
+	if not Net.is_online and (ls_runtime != null or Game.PRACTICE_MISSIONS.has(Game.current_mission_id)):
+		squad.apply_start_state()
 	var pending := Game.consume_pending_load()
 	if not pending.is_empty():
 		deserialize(pending)
@@ -268,6 +271,10 @@ func _bake_navigation() -> void:
 	nm.geometry_parsed_geometry_type = NavigationMesh.PARSED_GEOMETRY_STATIC_COLLIDERS
 	# Welt + Zäune + Kartengrenze (af1_finale2) + reine Netzflächen (B-010c, OrigLevel WALK_PATCHES „navramp“)
 	nm.geometry_collision_mask = 1 | (1 << 4) | LevelBuilder.BORDER_LAYER | LevelBuilder.NAV_ONLY_LAYER
+	if Game.cli.has("nav_detail"):   # 0.11.7 Messung: Detailnetz „Abstand,Fehler“ (Godot-Vorgabe 6,0 / 1,0 m)
+		var dd := String(Game.cli["nav_detail"]).split_floats(",")
+		nm.detail_sample_distance = dd[0]
+		nm.detail_sample_max_error = dd[1]
 	nm.region_min_size = 4.0
 	nm.filter_low_hanging_obstacles = true
 	nm.filter_ledge_spans = true
@@ -291,6 +298,18 @@ var _nav_queue: Array = []
 
 
 func _bake_tiles(nm: NavigationMesh) -> void:
+	# 0.11.7: Navmesh-Rampen über erkannte Treppen (StairFinder) – vor dem Einlesen der Quellgeometrie, damit sie auch
+	# in den Cache-Schlüssel eingehen. Ein Physikschritt vorher, damit die Kopfraumprobe alle Körper sieht.
+	# Karten mit eigenen Treppen-Korrekturen (OrigLevel.WALK_PATCHES: ARCTIC2 Scherentreppen, NORWAY) behalten diese –
+	# zusätzliche Rampen über übereinanderliegenden Läufen nahmen dort dem Podest darunter den Kopfraum (a2 T3 Fuß ✗).
+	var hand_patched := static_root != null and not static_root.find_children("WalkPatches", "StaticBody3D", true, false).is_empty()
+	if not Game.cli.has("nav_auto_stairs_off") and not hand_patched and static_root and static_root.get_node_or_null("NavStairRamps") == null:
+		await get_tree().physics_frame
+		if not is_inside_tree():
+			return
+		var ts := Time.get_ticks_msec()
+		var nr := StairFinder.add_nav_ramps(static_root, static_root, get_world_3d().direct_space_state)
+		print("NAV: %d Treppen-Rampen (Navmesh) in %d ms" % [nr, Time.get_ticks_msec() - ts])
 	var src := NavigationMeshSourceGeometryData3D.new()
 	NavigationServer3D.parse_source_geometry_data(nm, src, nav_region)
 	var box := src.get_bounds()
@@ -516,9 +535,83 @@ func _nav_tile_baked(reg: NavigationRegion3D, tile: NavigationMesh, src: Navigat
 		_bake_next_tile.call_deferred(src)
 	_nav_tile_done(reg, tile)
 
+## 0.11.7: Netzhöhe am Treppenfuß örtlich korrigieren statt global feineres Detailnetz (3/0,4 vervielfachte die
+## Polygone über die KI-Suchgrenze 65 536). Godot übernimmt die Höhe des groben Polygons (detail_sample_max_error 1 m) →
+## Netz am Fuß 0,5–0,6 m zu hoch. Eckpunkte VOR dem untersten Tritt (bis 2 m davor, ≤ 1,2 m seitlich), die 0,25–1,0 m über
+## dem Boden schweben, werden auf die Weltkollision darunter gesetzt; Eckpunkte über dem Lauf (Rampe) bleiben. Die
+## Polygonzahl ändert sich nicht. Idempotent (Cache-Weg läuft ebenfalls hierdurch). `--nav_foot_snap=0` = aus.
+## Local stair-foot height fix instead of a globally finer detail mesh; polygon count unchanged.
+func _snap_stair_feet(reg: NavigationRegion3D, tile: NavigationMesh) -> void:
+	if String(Game.cli.get("nav_foot_snap", "1")) == "0" or static_root == null:
+		return
+	var ramps := static_root.get_node_or_null("NavStairRamps")
+	if ramps == null or not ramps.has_meta("feet"):
+		return
+	var feet: Array = ramps.get_meta("feet")
+	if feet.is_empty():
+		return
+	var xf := reg.global_transform
+	var inv := xf.affine_inverse()
+	var verts := tile.get_vertices()
+	var space := get_world_3d().direct_space_state
+	var changed := 0
+	for i in verts.size():
+		var w: Vector3 = xf * verts[i]
+		for f in feet:
+			var b: Vector3 = f[0]
+			var d: Vector3 = f[1]
+			var t0: Vector3 = f[2]
+			if absf(w.x - b.x) > 2.5 or absf(w.z - b.z) > 2.5:
+				continue
+			var rel := w - t0
+			rel.y = 0.0
+			var along := rel.dot(d)
+			var lat := (rel - d * along).length()
+			# bis 0,6 m über den untersten Tritt hinaus (NORMANDY3_MP T3: Eckpunkt liegt schon über dem Lauf, Netz am Fuß
+			# interpoliert 0,6 m hoch); dort schützt die Bodenprobe: über Tritt/Rampe trifft der Strahl nicht auf Fußhöhe
+			if along > 0.6 or along < -2.0 or lat > 1.2:
+				continue
+			var lift := w.y - b.y
+			if lift < 0.25 or lift > 1.0:
+				continue
+			# Eckpunkt über dem Lauf einer ANDEREN Treppe nicht anfassen (nur innerhalb des Laufs; der Austritt eines
+			# Laufs ist im Treppenhaus oft der Fuß des nächsten – CZECH4 T7/T8)
+			if _over_other_run(w, f, feet):
+				continue
+			var q := PhysicsRayQueryParameters3D.create(w + Vector3.UP * 0.05, w + Vector3.DOWN * 1.2, 1)
+			var hit := space.intersect_ray(q)
+			if hit.is_empty() or absf((hit.position as Vector3).y - b.y) > 0.3:
+				continue
+			verts[i] = inv * Vector3(w.x, (hit.position as Vector3).y + 0.02, w.z)
+			changed += 1
+			break
+	if changed > 0:
+		tile.set_vertices(verts)
+		print("NAV: Treppenfuß-Höhenkorrektur %d Eckpunkte (%s)" % [changed, reg.name])
+
+
+static func _over_other_run(w: Vector3, f: Array, feet: Array) -> bool:
+	for g in feet:
+		if g == f or (g as Array).size() < 4:
+			continue
+		var t0: Vector3 = g[2]
+		var t1: Vector3 = g[3]
+		var d := Vector3(t1.x - t0.x, 0, t1.z - t0.z)
+		var ln := d.length()
+		if ln < 0.1:
+			continue
+		d /= ln
+		var rel := Vector3(w.x - t0.x, 0, w.z - t0.z)
+		var al := rel.dot(d)
+		if al > 0.3 and al < ln - 0.3 and (rel - d * al).length() < 0.6 and w.y > t0.y - 0.3:
+			return true
+	return false
+
+
 func _nav_tile_done(reg: NavigationRegion3D, tile: NavigationMesh) -> void:
 	if not is_instance_valid(reg):
 		return
+	_snap_stair_feet(reg, tile)
 	reg.navigation_mesh = tile
 	_nav_pending -= 1
 	if _nav_pending == 0:
@@ -922,6 +1015,30 @@ func _add_ladder_links() -> void:
 		var a := NavigationServer3D.map_get_closest_point(map, bottom)
 		# Austritt: Netzpunkt nahe der Oberkante (Kletterweg setzt den Soldaten 0,7 m vom Leiterkopf ab)
 		var b := NavigationServer3D.map_get_closest_point(map, top + Vector3.UP * 0.1)
+		# 0.11.7: übereinanderliegende Leiterabschnitte (Wachtürme ARCTIC1/3_OBJ m_arc1_hlaska_*, AFRICA5_MP): das
+		# Zwischenpodest hat kein Netz → Link vom Fuß des unteren bis zum Kopf des obersten Abschnitts, die KI klettert
+		# die Abschnitte nacheinander (AIBrain._climb_chain, Meta „ladder_chain“ hinauf / „ladder_chain_down“ hinab)
+		var chain: Array = []
+		if a.distance_to(bottom) <= 2.0 and b.distance_to(top) > 2.0 and String(Game.cli.get("nav_ladder_chain", "1")) != "0":
+			var cur = l
+			for _k in 4:
+				var nxt = null
+				for o in get_tree().get_nodes_in_group("ladders"):
+					if o != cur and ("at_top" in o) and not o.at_top and ("bottom" in o) \
+							and (o.bottom as Vector3).distance_to(cur.top) < 1.2:
+						nxt = o
+						break
+				if nxt == null:
+					break
+				chain.append(nxt)
+				cur = nxt
+				var bb := NavigationServer3D.map_get_closest_point(map, (nxt.top as Vector3) + Vector3.UP * 0.1)
+				if bb.distance_to(nxt.top) <= 2.0:
+					b = bb
+					top = nxt.top
+					break
+			if chain.is_empty() or b.distance_to(top) > 2.0:
+				chain.clear()
 		if a.distance_to(bottom) > 2.0 or b.distance_to(top) > 2.0 or absf(b.y - a.y) < 1.0:
 			continue
 		var link := NavigationLink3D.new()
@@ -930,6 +1047,21 @@ func _add_ladder_links() -> void:
 		link.start_position = a
 		link.end_position = b
 		link.set_meta("ladder", l)
+		if not chain.is_empty():
+			var up: Array = [l]
+			up.append_array(chain)
+			var down: Array = []
+			for seg in up:
+				for o in get_tree().get_nodes_in_group("ladders"):
+					if o != seg and o.at_top and o.top.is_equal_approx(seg.top) and o.bottom.is_equal_approx(seg.bottom):
+						down.push_front(o)
+						break
+			link.set_meta("ladder_chain", up)
+			if down.size() == up.size():
+				link.set_meta("ladder_chain_down", down)
+			else:
+				link.bidirectional = false        # ohne Kopf-Gegenstücke nur hinauf
+			link.name = "LadderChain_%d" % ladder_links.size()
 		for o in get_tree().get_nodes_in_group("ladders"):
 			if o != l and o.at_top and o.top.is_equal_approx(top) and o.bottom.is_equal_approx(bottom):
 				link.set_meta("ladder_top", o)

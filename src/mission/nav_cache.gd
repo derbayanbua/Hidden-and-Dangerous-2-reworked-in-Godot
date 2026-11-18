@@ -74,7 +74,8 @@ static func make_key(m: Node, nm: NavigationMesh, src: NavigationMeshSourceGeome
 	for p in ["res://src/mission/mission.gd", "res://src/mission/nav_cache.gd", "res://src/actors/soldier.gd"]:
 		parts.append(_code_md5(p))
 	# Optionen
-	for opt in ["no_nav_bridges", "nav_slope", "nav_tiles"]:
+	parts.append("detail:%s|%s" % [nm.detail_sample_distance, nm.detail_sample_max_error])
+	for opt in ["no_nav_bridges", "nav_slope", "nav_tiles", "nav_auto_stairs_off", "nav_foot_snap"]:
 		parts.append("%s=%s" % [opt, str(Game.cli.get(opt, "<none>"))])
 	parts.append("plan:" + plan)
 	hc.update("\n".join(parts).to_utf8_buffer())

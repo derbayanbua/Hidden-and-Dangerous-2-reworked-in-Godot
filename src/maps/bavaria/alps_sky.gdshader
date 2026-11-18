@@ -50,6 +50,7 @@ vec4 mountain_band(float u, float elevation, vec3 horizon) {
 // Fernkulisse Nord/Ost/West (assets/maps/bavaria/panorama): Streifen mit transparentem Himmel.
 // *_p = (Horizontzeile v, v je Radiant, u je Radiant, u der Bildmitte = Sektorrichtung)
 uniform bool far_enabled = false;
+uniform bool ring_active = false;   // true: Panorama als Ring-Geometrie (panorama_ring.gd), Streifen hier aus
 uniform sampler2D far_north : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D far_east : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D far_west : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
@@ -126,7 +127,9 @@ void sky() {
 	// Sterne nur bei Nacht und klarem Himmel
 	result += vec3(0.85,0.88,1.0)*star_field(ray)*night*(1.0-cloud_mask)*smoothstep(0.04,0.25,elevation);
 	float azimuth = atan(dot(ray,east),dot(ray,south_direction));   // 0 = Süd, +π/2 = Ost, ±π = Nord, −π/2 = West
-	if (far_enabled) {
+	if (ring_active) {
+		// Fernkulisse liegt als Geometrie-Ring in der Szene (panorama_ring.gd): hier nur Himmel
+	} else if (far_enabled) {
 		// Umlaufende Fernkulisse: Süd = Alpen, Nord/Ost/West = Landschaftsstreifen; weiche Sektorübergänge
 		float d_s = azimuth;
 		float d_e = wrap_angle(azimuth-1.5707963);

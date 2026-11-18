@@ -90,9 +90,30 @@ func _on_peer_gone(peer: int) -> void:
 	_pending.erase(peer)
 
 
+## 0.11.7: Neustart/Verlassen leert auch die Peer-Tabellen (Langlauf: keine Altlasten über Sitzungen).
+## Pending drop timers stay harmless: _drop_now checks _live.
 func reset() -> void:
 	_pending.clear()
+	_live.clear()
+	_dropping.clear()
+	_ip_req.clear()
 	_cnonce = ""
+
+
+## 0.11.7: verzögerte Trennung eines angemeldeten Peers (Rauswurf, Ablehnung, Gast-Zeitlimit) über denselben Weg wie
+## die Auth-Trennung – höchstens einmal je Peer, nie nach peer_disconnected (v0.11.3: Doppel-disconnect-Schleife).
+## Delayed drop of an authenticated peer via the same once-only path.
+func drop_peer(peer: int, ms := 1000) -> void:
+	var m := _mp()
+	if m == null or not m.get_peers().has(peer):
+		return
+	_live[peer] = true
+	_drop_later(peer, ms)
+
+
+## Tests/Diagnose: Größe der Peer-Tabellen
+func table_sizes() -> Dictionary:
+	return {"pending": _pending.size(), "live": _live.size(), "dropping": _dropping.size(), "ip_req": _ip_req.size()}
 
 
 # ------------------------------------------------------------------ Rahmen
@@ -214,6 +235,10 @@ func _rate_ok(ip: String) -> bool:
 	var l: Array = (_ip_req.get(ip, []) as Array).filter(func(x): return t - int(x) < PER_IP_WINDOW_MS)
 	l.append(t)
 	_ip_req[ip] = l
+	if _ip_req.size() > 256:      # 0.11.7: Speicher begrenzen (viele Quell-IPs) / bound memory
+		for k in _ip_req.keys():
+			if (_ip_req[k] as Array).is_empty() or t - int((_ip_req[k] as Array).back()) >= PER_IP_WINDOW_MS:
+				_ip_req.erase(k)
 	return l.size() <= PER_IP_REQ
 
 

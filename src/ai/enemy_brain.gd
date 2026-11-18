@@ -215,6 +215,8 @@ func script_ill_fire(t: Node3D, seconds: float) -> void:
 	_ill_target = t
 	_ill_fire_t = maxf(seconds, 0.1)
 	stop_moving()
+	# B-051 [B]: nur echte IllFire-Aufträge (Controller +0xB4) – Geschosse fliegen durch Akteure (Ballistics.pass_actors)
+	soldier.set_meta("illfire_shots", attack_illfire)
 
 
 func ill_fire_done() -> bool:
@@ -226,6 +228,7 @@ func _ill_fire_tick(delta: float) -> void:
 	soldier.move_input = Vector3.ZERO
 	if not is_instance_valid(_ill_target) or _ill_fire_t <= 0.0:
 		_ill_fire_t = 0.0
+		soldier.set_meta("illfire_shots", false)
 		cease_fire()
 		return
 	var p := _ill_target.global_position + (Vector3.UP * 1.2 if _ill_target is Soldier else Vector3.ZERO)
@@ -283,6 +286,7 @@ var _attack_target: Soldier
 
 func script_attack_order(t: Node3D, seconds: float, illfire: bool) -> void:
 	attack_illfire = illfire
+	soldier.set_meta("illfire_shots", false)
 	var s := t as Soldier
 	# IllFire (Flag +0xB4) = gezieltes Feuern ohne Positionswechsel [P] (ALPS1 Zielscheiben, ARCTIC3 Hinrichtung)
 	if not illfire and s and s.alive and s.team != soldier.team and s.team != Soldier.TEAM_NEUTRAL:
@@ -354,6 +358,11 @@ func leash_radius() -> float:
 ## Original-KI-Regeln (Leine, Suchzeit, Wahrnehmungsformel, Granatbedingung) nur für Originalmissionen offline.
 func _orig_rules() -> bool:
 	return runtime != null and not Net.is_online
+
+
+## 0.11.7 AP-48e: Original-Zielfehler 0x5722B0 [B] nur mit Original-Regeln (`--orig_aim=0` = alte Formel)
+func orig_aim_enabled() -> bool:
+	return _orig_rules() and String(Game.cli.get("orig_aim", "1")) != "0"
 
 
 func _in_leash(p: Vector3) -> bool:
@@ -733,7 +742,10 @@ func _combat(delta: float) -> void:
 				gren_ok = _orig_grenade_ok(tpos, delta)
 	if gren_ok and _grenade_cd <= 0.0 and tdist > min_gren and tdist < 32.0 and level_ok and not stationary:
 		_grenade_cd = randf_range(12.0, 20.0)
-		if throw_grenade_at(tpos):
+		var gpos := tpos
+		if orig_aim_enabled():
+			gpos = _OrigAiAim.grenade_target(tpos, _OrigAiAim.shooting_of(soldier))   # 0x5722B0 Granatzweig [B]
+		if throw_grenade_at(gpos):
 			stop_moving()
 			_cover_pos = Vector3.INF   # danach neue Deckung wählen
 			return

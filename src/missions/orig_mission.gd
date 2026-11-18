@@ -151,6 +151,8 @@ func _spawn_actors() -> void:
 			inst.global_transform = t2
 			if model != "" and typ in [5, 7, 9, 13, 14, 15, 20, 21, 22, 23, 25, 28]:
 				orig._add_collision(inst)     # z. B. Normandie-Kanonen (Typ 25) müssen Treffer erhalten
+				if typ in [5, 25]:
+					_nav_obstacle(inst)       # fix_af1_tanks: feste Objekte unter dynamic_root fehlten im Navmesh
 			runtime.register_actor(nm, inst)
 			if typ == 14:
 				# Zug (CZECH1 „lokotka“): Wagen folgen der Lok (src/vehicles/orig_train.gd, re_notes_ai §5)
@@ -684,3 +686,50 @@ func finish(success: bool, reason: String) -> void:
 	if runtime and success:
 		Game.store_orig_game_values(runtime.game_values)
 	super.finish(success, reason)
+
+
+## fix_af1_tanks [E]: Akteurmodelle liegen unter dynamic_root (nicht in der Navmesh-Quelle) → KI-Wege führten durch
+## Tanks/Fässer (AFRICA1 m_nadrz*). Ihre Kollisionsformen werden zusätzlich als reine Netzquelle unter static_root
+## gelegt (LevelBuilder.NAV_ONLY_LAYER, keine Physikwirkung). Nur Typ 5 (Fass) und 25 (Zerstörbares); nach einer
+## Zerstörung bleibt die Netzsperre (Trümmer bleiben stehen). `--nav_actor_obstacles=0` = alter Stand.
+func _nav_obstacle(inst: Node3D) -> void:
+	if static_root == null or String(Game.cli.get("nav_actor_obstacles", "1")) == "0":
+		return
+	var nb := static_root.get_node_or_null("NavActorObstacles") as StaticBody3D
+	if nb == null:
+		nb = StaticBody3D.new()
+		nb.name = "NavActorObstacles"
+		nb.collision_layer = LevelBuilder.NAV_ONLY_LAYER
+		nb.collision_mask = 0
+		static_root.add_child(nb)
+	# Je Kollisionsform ein achsparalleler Plattenstapel bis 2,5 m über die Oberkante: die Oberseite liegt damit außer
+	# Kletterhöhe (Soldier.CLIMB_MAX 2,3 m) – sonst legt das Netz Inseln auf Tank-/Fassdeckel samt Kletterlinks an.
+	# Große Objekte (Grundriss > 8 m, z. B. Flugzeuge) bleiben ausgenommen (unter Tragflächen begehbar).
+	var shapes: Array[AABB] = []
+	var all := AABB()
+	for b in inst.find_children("*", "StaticBody3D", true, false):
+		if not ((b as StaticBody3D).collision_layer & 1):
+			continue
+		for c in (b as Node).get_children():
+			var cs := c as CollisionShape3D
+			if cs == null or cs.shape == null:
+				continue
+			var ab: AABB = cs.global_transform * cs.shape.get_debug_mesh().get_aabb()
+			all = ab if shapes.is_empty() else all.merge(ab)
+			shapes.append(ab)
+	if shapes.is_empty() or maxf(all.size.x, all.size.z) > 8.0:
+		return
+	for ab in shapes:
+		if maxf(ab.size.x, ab.size.z) < 0.3:
+			continue        # dünne Stangen/Leitungen: Netz bleibt durchgehend
+		# Recast rastert nur Oberflächen: das Innere eines hohen Blocks wäre begehbare Luft (Insel im Tank). Daher
+		# Platten alle 1,4 m (< Agentenhöhe 1,6 m → dazwischen nicht begehbar) vom Boden bis 2,5 m über die Oberkante.
+		var bx := BoxShape3D.new()
+		bx.size = Vector3(ab.size.x, 0.2, ab.size.z)
+		var y := ab.position.y - 0.15
+		while y < ab.end.y + 2.5:
+			var n := CollisionShape3D.new()
+			n.shape = bx
+			nb.add_child(n)
+			n.global_position = Vector3(ab.get_center().x, y, ab.get_center().z)
+			y += 1.4

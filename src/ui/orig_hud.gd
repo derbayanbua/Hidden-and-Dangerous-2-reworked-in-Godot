@@ -304,11 +304,34 @@ func _fill(nm: String, frac: float) -> void:
 		at.region = Rect2(reg.position.x, reg.end.y - reg.size.y * frac, reg.size.x, reg.size.y * frac)
 
 
+## 0.11.7: MP-Regel „minimap“ an → Kompass (Gruppe compass inkl. Kameradenpunkte) ausgeblendet, die Minikarte
+## (src/ui/mp_minimap.gd) ersetzt ihn. Über self_modulate, weil die Laufzeit visible/modulate der Sektoren selbst setzt.
+var compass_hidden := false
+
+
+func _apply_compass_hidden() -> void:
+	var c := Color(1, 1, 1, 0) if compass_hidden else Color(1, 1, 1, 1)
+	for nm in elements:
+		if String(elements[nm]["group"]) == "compass":
+			(elements[nm]["node"] as Control).self_modulate = c
+	for key in compass_dots:
+		(compass_dots[key]["node"] as Control).self_modulate = c
+
+
+## Kompass sichtbar (Ziffernblatt vorhanden, sichtbar und nicht über compass_hidden ausgeblendet) – Tests
+func compass_shown() -> bool:
+	if not elements.has("kmpscvr"):
+		return false
+	var n: Control = elements["kmpscvr"]["node"]
+	return n.is_visible_in_tree() and n.self_modulate.a > 0.0
+
+
 func _process(delta: float) -> void:
 	if mission == null or elements.is_empty():
 		return
 	var sq := mission.squad
 	var active: Soldier = mission.controller.active if mission.controller else null
+	_apply_compass_hidden()
 	_update_squad_bar(active)
 	_update_injury(active, delta)
 	_update_rest(active, delta)
@@ -474,6 +497,7 @@ func _update_compass_dots(active: Soldier, delta: float) -> void:
 			tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 			tr.stretch_mode = TextureRect.STRETCH_SCALE
 			tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			tr.self_modulate.a = 0.0 if compass_hidden else 1.0
 			add_child(tr)
 			compass_dots[key] = {"node": tr, "alpha": 1.0, "soldier": s}
 	for key in compass_dots.keys():

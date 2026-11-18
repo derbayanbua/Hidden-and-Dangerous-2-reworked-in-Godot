@@ -29,6 +29,10 @@ func _run() -> void:
 		await _run_fsm(m, rt, c, space)
 		_finish()
 		return
+	if String(Game.cli.get("phase", "")) == "aim":
+		await _run_aim(m, rt, c, space)
+		_finish()
+		return
 	if String(Game.cli.get("phase", "")) == "ap6":
 		await _run_ap6(m, rt, c, space)
 		_finish()
@@ -245,6 +249,82 @@ func _run_ap6(m, rt: LsRuntime, c: Soldier, space: PhysicsDirectSpaceState3D) ->
 	await seconds(1.0)
 	check(b1.attack_done(), "HUMAN_IllFire: Rückmeldung nach Ablauf")
 	check(not rt.stubbed.has("HUMAN_ATTACK") and not rt.stubbed.has("HUMAN_SETSNIPER"), "Attack/SetSniper nicht stumm")
+
+
+## 0.11.7 AP-48e (--phase=aim): KI-Zielfehler 0x5722B0/0x572120 [B] – Formelgrenzen, Schwierigkeit, waagrechter Versatz,
+## Granatziel, Einbau in die Schussroutine (Gegner trifft den Spieler mit Original-Fehler, keine Zusatzstreuung).
+const _AIM := preload("res://src/ai/orig_ai_aim.gd")
+
+
+func _run_aim(m, rt: LsRuntime, c: Soldier, space: PhysicsDirectSpaceState3D) -> void:
+	var r := RandomNumberGenerator.new()
+	r.seed = 1234
+	# Grenzen der Formel: Schießen 100, liegend, steht, lange verfolgt, Gewehr → 0..0,4+0,5 = 0..0,9
+	var lo := INF
+	var hi := -INF
+	for i in 500:
+		var s: float = _AIM.deviation(100.0, 2, -1, 5000.0, 0, r)
+		lo = minf(lo, s); hi = maxf(hi, s)
+	check(lo >= 0.0 and hi <= 0.9 and hi - lo > 0.6, "0x572120 Bestwert (Schießen 100, liegend, ruhig): 0–0,9", "%.3f–%.3f" % [lo, hi])
+	lo = INF; hi = -INF
+	for i in 500:
+		var s: float = _AIM.deviation(40.0, 0, 5, 1000.0, 2, r)
+		lo = minf(lo, s); hi = maxf(hi, s)
+	# 1,2 + 0,7..1,0 + 0,5..0,8 + 0,4..1,0 + 1,0..1,4 = 3,8..5,4
+	check(lo >= 3.8 - 1e-4 and hi <= 5.4 + 1e-4, "0x572120 Schlechtwert (Schießen 40, stehend, Sprint, frisch, Pistole): 3,8–5,4",
+		"%.3f–%.3f" % [lo, hi])
+	check(is_equal_approx(_AIM.difficulty_k(1), 2.0) and is_equal_approx(_AIM.difficulty_k(2), 1.5) and _AIM.difficulty_k(3) == 1.0
+		and _AIM.difficulty_k(4) == 1.0, "Schwierigkeit 1 ×2, 2 ×1,5, sonst ×1 (0x5722B0)")
+	# Versatz nur waagrecht, Betrag ≤ s/100
+	var ok_h := true
+	var max_off := 0.0
+	var dir := Vector3(0.3, -0.1, -0.95).normalized()
+	for i in 500:
+		var d2: Vector3 = _AIM.apply(dir, 2.0, r)
+		var off := (d2 - dir)
+		var cross := dir.cross(Vector3.UP).normalized()
+		var lateral := absf(off.dot(cross))
+		max_off = maxf(max_off, atan2(lateral, 1.0))
+		if absf(atan2(d2.y, Vector2(d2.x, d2.z).length()) - atan2(dir.y, Vector2(dir.x, dir.z).length())) > 0.002:
+			ok_h = false
+	check(ok_h and max_off <= atan(2.0 / 100.0) + 0.002 and max_off > atan(1.5 / 100.0),
+		"0x5722B0 Versatz waagrecht, bis ±s m auf 100 m", "max %.3f° (Grenze %.3f°)" % [rad_to_deg(max_off), rad_to_deg(atan(0.02))])
+	var gmax := 0.0
+	for i in 400:
+		var g: Vector3 = _AIM.grenade_target(Vector3.ZERO, 70.0, r)
+		gmax = maxf(gmax, maxf(absf(g.x), maxf(absf(g.y), absf(g.z))))
+	check(gmax <= 3.0 + 1e-4 and gmax > 2.5, "Granatziel ±(10 − Schießen·0,1) m je Achse", "Schießen 70: max %.2f m" % gmax)
+
+	# Einbau: Wache feuert auf den Spieler, Haken aktiv, keine Zusatzstreuung, Fehler im erwarteten Bereich
+	var w1 := rt.actors.get("WALKER_GUARD_1") as Soldier
+	var b1 := w1.get_node("EnemyBrain") as EnemyBrain
+	var vm = rt.vm_for(w1)
+	if vm:
+		vm.paused = true
+	b1.suspended = false
+	b1.script_control = false
+	check(b1.orig_aim_enabled(), "Original-Zielfehler aktiv (Originalmission offline)")
+	var fwd := w1.aim_direction()
+	fwd.y = 0.0
+	fwd = fwd.normalized()
+	var tp := w1.global_position + fwd * 15.0
+	var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(tp + Vector3.UP * 20, tp + Vector3.DOWN * 40, 1))
+	c.global_position = (hit.position as Vector3) + Vector3.UP * 0.3 if not hit.is_empty() else tp
+	c.velocity = Vector3.ZERO
+	var shots := [0]
+	var cb := func(_w): shots[0] += 1
+	w1.shot_fired.connect(cb)
+	for i in 600:
+		await get_tree().physics_frame
+		if shots[0] >= 3:
+			break
+	w1.shot_fired.disconnect(cb)
+	var shooting: float = _AIM.shooting_of(w1)
+	var smax := 2.0 * (1.0 - shooting * 0.01) + 1.0 + 0.8 + 1.0 + 1.4
+	smax *= _AIM.difficulty_k(Net.difficulty_level())
+	check(shots[0] > 0 and w1.aim_dir_hook.is_valid() and w1.extra_spread == 0.0 and b1.orig_aim_last > 0.0
+		and b1.orig_aim_last <= smax, "Wache schießt mit Original-Zielfehler",
+		"Schüsse %d, s=%.2f (≤ %.2f), Schießen %.0f" % [shots[0], b1.orig_aim_last, smax, shooting])
 
 
 ## AP-3 (--phase=fsm): Kampfautomat 0x549AE0, Deckungswahl 0x553EB0/0x5541F0, Wahrnehmung AP-7 (feste Zufallssamen).

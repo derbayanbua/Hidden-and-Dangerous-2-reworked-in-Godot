@@ -2159,7 +2159,12 @@ func _particles(id: int, pos: Vector3, indexed := false) -> Node3D:
 	var node := OrigParticles.spawn(id, pos, mission.dynamic_root)
 	if not indexed:
 		if OrigParticles.is_continuous(id):
-			get_tree().create_timer(60.0, false).timeout.connect(func(): OrigParticles.stop(node))
+			# 0.11.7: Karte kann vorher entladen sein (Kartenwechsel) → freigegebener Lambda-Capture; erst prüfen
+			var nref: WeakRef = weakref(node)
+			get_tree().create_timer(60.0, false).timeout.connect(func():
+				var n = nref.get_ref()
+				if n != null and is_instance_valid(n):
+					OrigParticles.stop(n))
 		else:
 			get_tree().create_timer(float(node.get_meta("max_life", 2.0)) + 1.0, false).timeout.connect(func():
 				if is_instance_valid(node):
@@ -2258,6 +2263,7 @@ func _set_ai_mode(b: EnemyBrain, fname: String) -> void:
 
 var in_cutscene := false
 var fake_cutscene := false      ## B-049: CSC_SetupFakeCutscene(true) – Skriptkamera, Welt läuft weiter
+var fake_cutscene_log: Array = []   ## 0.11.7: [an/aus, ms] je Umschaltung (Löser-Nachweis Missionsende nach Skriptkette)
 var cutscene_id := 0
 var _cutscene_vm: LsVM
 var _cut_cam: Camera3D
@@ -2349,6 +2355,7 @@ func run_cutscene(n: int, vm: LsVM) -> void:
 ## wirkt; aus: Spielkamera/HUD/Steuerung zurück (Skript ruft vorher SetPlayerInput(true), FRM_SetActiveCamera(K0)).
 func set_fake_cutscene(on: bool) -> void:
 	fake_cutscene = on
+	fake_cutscene_log.append([on, Time.get_ticks_msec()])     # 0.11.7 Nachweis Löserlauf (AP-49b)
 	if mission == null:
 		return
 	if mission.controller:

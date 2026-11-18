@@ -23,6 +23,13 @@ const TRAIL_S := 0.25
 const TRAIL_HP := 0.5           ## Spur ab ≤ 50 % Gesundheit [D]
 const TRAIL_STEP := 0.9         ## m zwischen zwei Tropfen [D]
 const WORLD_MASK := 1
+## 0.11.7 [D]: sichtbarer Lachen-Durchmesser = pool_max × POOL_VIS – die Lache ragt unter der Leiche hervor (vorher
+## lag sie auf Gras fast ganz unter dem Körper und war dunkelrot auf dunkelgrün kaum zu erkennen)
+const POOL_VIS := 1.6
+const POOL_COLOR := Color(0.78, 0.05, 0.04)
+const SPLAT_COLOR := Color(0.85, 0.09, 0.07)
+## Decals blenden auf Flächen quer zur Projektionsrichtung aus (sonst gestreckte Streifen an Wandfüßen/Kanten)
+const NORMAL_FADE := 0.55
 const WOUND_LAYER := 1 << 19    ## Renderebene 20: nur Figurenmeshes – Kleidungs-Decals treffen nicht die Welt
 
 var splats: Array = []
@@ -661,7 +668,7 @@ func stump_pool(s: Node3D, at: Node3D, size: float, delay := 0.6) -> void:
 		var a := instance_from_id(aid) as Node3D
 		if a == null or not is_instance_valid(a):
 			return
-		var d := _floor_splat(a.global_position, size, "x_blood05", 2.5, randf_range(5.0, 8.0), true)
+		var d := _floor_splat(a.global_position, size * POOL_VIS, "x_blood05", 2.5, randf_range(5.0, 8.0), true)
 		if d != null:
 			d.set_meta("owner_soldier", sid)
 			d.set_meta("pool_max", size))
@@ -683,7 +690,7 @@ func _pool_for(s: Node3D, size: float, delay: float) -> void:
 		get_tree().create_timer(delay, false).timeout.connect(_pool_later.bind(s.get_instance_id(), size))
 		return
 	var grow := randf_range(6.0, 10.0)
-	var d := _floor_splat(body_center(s), size, "x_blood05", 2.5, grow, true)
+	var d := _floor_splat(body_center(s), size * POOL_VIS, "x_blood05", 2.5, grow, true)
 	if d != null:
 		d.set_meta("owner_soldier", s.get_instance_id())
 		d.set_meta("pool_max", size)
@@ -715,8 +722,9 @@ func _splat(pos: Vector3, normal: Vector3, size: float, tn: String, grow := 0.0,
 		return null
 	var d := Decal.new()
 	d.texture_albedo = tex(tn)
-	d.modulate = Color(0.5, 0.035, 0.03) if pool else Color(0.75, 0.08, 0.06)   # B-045: dunkler (geronnen)
+	d.modulate = POOL_COLOR if pool else SPLAT_COLOR   # 0.11.7: heller als B-045, auf Gras/Dämmerung erkennbar
 	d.albedo_mix = 1.0
+	d.normal_fade = NORMAL_FADE
 	d.cull_mask = 1
 	d.upper_fade = 0.2
 	d.lower_fade = 0.2

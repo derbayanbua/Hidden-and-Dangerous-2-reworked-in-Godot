@@ -135,7 +135,62 @@ func _keys_rebind_roundtrip(menu) -> void:
 	await frames(2)
 	check(sp("move_forward") == str(KEY_W) and sp("jump") == "<null>", "STANDARD-EINSTELLUNGEN 1 stellt Vorgabe her")
 	DirAccess.remove_absolute(path)
+	await _keys_full_check(menu)
 	menu.options_page = "graphics"
+
+
+## 0.11.7: Tastenmenü komplett – Vorgaben konfliktfrei, STANDARD 2, Tausch mit unbelegter Aktion, Zurücksetzen,
+## Speichern je Profil (ConfigFile-Rundlauf), Migrationsschutz. / Complete key menu check.
+func _keys_dupes() -> Array:
+	var out: Array = []
+	for a: String in InputSetup.ACTIONS:
+		for o in InputSetup.conflicts(a, InputSetup.spec_of(a)):
+			# T = Granatbefehl (offline) / Chat (online): bewusst kontextexklusiv (B-022b)
+			if a < String(o) and not ([a, String(o)] in [["chat_all", "order_grenade"], ["order_grenade", "chat_all"]]):
+				out.append("%s=%s" % [a, o])
+	return out
+
+
+func _keys_full_check(menu) -> void:
+	InputSetup.reset_defaults()
+	var d := _keys_dupes()
+	check(d.is_empty(), "Vorgabe 1 ohne Doppelbelegung je Kontext", str(d))
+	(menu.find_child("bdefault2", true, false) as Button).pressed.emit()
+	await frames(2)
+	d = _keys_dupes()
+	check(sp("move_forward") == str(KEY_UP) and sp("stance_crouch") == str(KEY_CTRL), "STANDARD-EINSTELLUNGEN 2 gesetzt")
+	check(d.is_empty(), "Vorgabe 2 ohne Doppelbelegung je Kontext", str(d))
+	InputSetup.reset_defaults()
+	# Tausch, wenn die umzubelegende Aktion unbelegt ist: die bisherige Inhaberin wird unbelegt (keine Doppelbelegung)
+	InputSetup.unbind("jump")
+	var fwd = InputSetup.spec_of("move_forward")
+	var sw: Array = InputSetup.rebind("jump", _key(int(fwd)))
+	check(sw == ["move_forward"] and sp("move_forward") == "<null>" and sp("jump") == str(fwd) and _keys_dupes().is_empty(),
+		"Unbelegte Aktion übernimmt belegte Taste → alte Aktion unbelegt", str(sw))
+	# Taste mit keycode statt physical_keycode (manche Eingabewege) wird gleich erkannt
+	var k := InputEventKey.new()
+	k.keycode = KEY_O
+	k.pressed = true
+	InputSetup.rebind("climb", k)
+	check(sp("climb") == str(KEY_O) and InputSetup.binding_text("climb") == OS.get_keycode_string(KEY_O), "Taste nur mit keycode")
+	# Speichern/Laden: alle Aktionen geschrieben, Version gesetzt, unbelegt bleibt unbelegt
+	var cfg := ConfigFile.new()
+	InputSetup.write_keys(cfg)
+	check(cfg.get_section_keys("keys").size() == InputSetup.ACTIONS.size()
+		and int(cfg.get_value("meta", "keys_version", 0)) == InputSetup.KEYS_VERSION
+		and String(cfg.get_value("keys", "move_forward")) == InputSetup.UNBOUND, "Speichern: alle Aktionen + Version + unbelegt")
+	InputSetup.reset_defaults()
+	InputSetup.read_keys(cfg)
+	check(sp("move_forward") == "<null>" and sp("jump") == str(fwd) and sp("climb") == str(KEY_O), "Laden stellt gespeicherten Stand her")
+	# aktuelle Datei mit einer Taste, die zufällig einem alten Standard gleicht, wird NICHT migriert
+	cfg.set_value("keys", "medkit", KEY_5)
+	InputSetup.read_keys(cfg)
+	check(sp("medkit") == str(KEY_5), "Aktueller Stand: eigene Taste gleich altem Standard bleibt")
+	# Zurücksetzen über das Spiel-Optionsmenü (Overlay)
+	var has_reset := FileAccess.get_file_as_string("res://src/ui/options_menu.gd").contains("InputSetup.reset_defaults()")
+	InputSetup.reset_defaults()
+	check(has_reset and sp("move_forward") == str(KEY_W) and sp("climb") == "<null>" and _keys_dupes().is_empty(),
+		"Zurücksetzen: Vorgabe vollständig, konfliktfrei")
 
 
 func _run() -> void:

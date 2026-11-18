@@ -151,6 +151,17 @@ func _run() -> void:
 			cam.look_at(water_c + Vector3(0, 0, -110.0), Vector3.UP)
 			await get_tree().create_timer(0.6).timeout
 			await _save("wasser_fern")
+			# 0.11.7: Spieltest Schwimmen in „voda“ (Spieler über die Wassermitte setzen)
+			Net.allow_teleport(me, water_c + Vector3(0, 1.0, 0))
+			me.global_position = water_c + Vector3(0, 1.0, 0)
+			me.velocity = Vector3.ZERO
+			await _wait(func(): return me.swimming, 6.0)
+			check(me.swimming, "Schwimmen in voda (Lage %s)" % str(me.global_position))
+			check(me.global_position.y > water_c.y - 3.0, "Nicht durch den Grund gefallen (y %.1f, Wasser %.1f)" % [me.global_position.y, water_c.y])
+			cam.global_position = me.global_position + Vector3(4, 2.5, 4)
+			cam.look_at(me.global_position, Vector3.UP)
+			await get_tree().create_timer(1.0).timeout
+			await _save("wasser_schwimmen")
 		var eye := me.global_position + Vector3(0, 6, 0)
 		if dn:
 			for h in [5.5, 7.0, 9.0, 12.0, 17.5, 19.0, 20.0, 23.0]:

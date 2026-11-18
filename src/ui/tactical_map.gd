@@ -11,6 +11,8 @@ extends CanvasLayer
 ##   den markierten Wegpunkt.
 ## - Marker wie im Original: Verbündete (x_we, aktiver Soldat x_wesel), bekannte Feinde (x_enm), Zivilisten/NPC
 ##   (x_civ), Ziele (x_object)
+## - 0.11.7 [D]: aktiver Soldat als Pfeil (Lage + Blickrichtung), gehörte/gesehene schießende Gegner (ohne Schalldämpfer)
+##   2,5 s als Schussmarke – gemeinsame Logik mit den MP-Karten (MapMarks, src/ui/map_marks.gd)
 ## Ausführung: Die Soldaten laufen ihre Wegpunkte der Reihe nach ab (SquadBrain MOVE + plan), Haltung als
 ## stance_override, GEHEN/LANGSAM = leise (Schleichen), Stimmung → Feuerregel (aggressiv = Feuer frei, defensiv =
 ## nur bei Beschuss/auf Kommando, passiv = Feuer halten – Zuordnung [P]); an Signal-Wegpunkten warten sie, bis
@@ -98,6 +100,31 @@ func setup(m: Mission) -> void:
 	_overlay.add_child(_help)
 	_build_bar()
 	_overlay.resized.connect(_layout_bar)
+	marks.accept = shot_known
+	marks.connect_noise()
+
+
+func _exit_tree() -> void:
+	marks.disconnect_noise()
+
+
+# --- 0.11.7: Schussmarken wie die MP-Karten (MapMarks, src/ui/map_marks.gd) -------------------------------------
+## [D] Gegner, die schießen (ohne Schalldämpfer), erscheinen SHOT_TTL s an der Schützenlage, wenn der Trupp den Schuss
+## hört (ein lebendes Mitglied innerhalb der Geräuschweite) oder den Schützen sieht/kennt (known_enemies). Die Restzeit
+## läuft nur bei laufendem Spiel (Pause/Karte ohne Echtzeit hält die Marken fest).
+var marks := MapMarks.new()
+
+
+func shot_known(s: Soldier, pos: Vector3, radius: float) -> bool:
+	if mission == null or mission.squad == null or mission.squad.members.has(s):
+		return false
+	var lead: Soldier = mission.squad.leader()
+	if lead and s.team == lead.team:
+		return false
+	for m in mission.squad.alive_members():
+		if m.global_position.distance_to(pos) <= radius:
+			return true
+	return known_enemies().has(s)
 
 
 # --- Knopfleiste (Originalsymbole aus gameinterface.4ds) ------------------------------------------------
@@ -389,6 +416,8 @@ func _update_camera() -> void:
 
 
 func _process(delta: float) -> void:
+	if not get_tree().paused:
+		marks.tick(delta)
 	if not is_open:
 		return
 	var pan := Vector3.ZERO
@@ -617,14 +646,14 @@ func _draw_overlay() -> void:
 	var font := ThemeDB.fallback_font
 	# Ziele (x_object)
 	var m01 := mission
-	var marks := []
+	var goals := []
 	if "radio_site" in m01 and m01.radio_site:
-		marks.append([m01.radio_site.global_position, "Funksender", m01.objective(&"radio").is_done()])
+		goals.append([m01.radio_site.global_position, "Funksender", m01.objective(&"radio").is_done()])
 	if "codebook" in m01 and m01.codebook:
-		marks.append([m01.codebook.global_position, "Codebuch", m01.objective(&"codebook").is_done()])
+		goals.append([m01.codebook.global_position, "Codebuch", m01.objective(&"codebook").is_done()])
 	if mission.extraction_pos.is_finite() and mission.extraction_pos != Vector3.ZERO:
-		marks.append([mission.extraction_pos, "Abholpunkt", false])
-	for mk in marks:
+		goals.append([mission.extraction_pos, "Abholpunkt", false])
+	for mk in goals:
 		var sp := _cam.unproject_position(mk[0])
 		var col := Color(0.6, 0.9, 0.5) if mk[2] else Color(1.0, 0.85, 0.3)
 		_marker(sp, "objective", col, 9.0)
@@ -635,6 +664,9 @@ func _draw_overlay() -> void:
 		_marker(sp, "civil" if e.team != Soldier.TEAM_AXIS else "enemy", Color(0.9, 0.2, 0.15))
 		var f := e.forward()
 		_overlay.draw_line(sp, sp + Vector2(f.x, f.z) * 14.0, Color(0.9, 0.2, 0.15), 2.0)
+	# 0.11.7: schießende Gegner (gehört/gesehen, ohne Schalldämpfer), SHOT_TTL s ausblendend
+	for e in marks.shots:
+		MapMarks.draw_shot(_overlay, _cam.unproject_position(e["pos"]), e, 1.3)
 	# Pläne: Wegpunktketten
 	for s in plans:
 		if not is_instance_valid(s):
@@ -673,7 +705,10 @@ func _draw_overlay() -> void:
 		if selected.has(s):
 			_overlay.draw_arc(sp, 13.0, 0, TAU, 24, Color.WHITE, 2.0)
 		var f := s.forward()
-		_overlay.draw_line(sp, sp + Vector2(f.x, f.z) * 16.0, col, 2.0)
+		if s == mission.squad.leader():
+			MapMarks.draw_self(_overlay, sp, MapMarks.dir2(f), col, 1.4)   # 0.11.7: eigene Lage + Blickrichtung wie MP-Karten
+		else:
+			_overlay.draw_line(sp, sp + Vector2(f.x, f.z) * 16.0, col, 2.0)
 		_overlay.draw_string(font, sp + Vector2(9, -8), str(i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, col)
 		var b := mission.squad.brain_of(s)
 		if b and s != mission.squad.leader() and b.order != SquadBrain.Order.FOLLOW and not plans.has(s):

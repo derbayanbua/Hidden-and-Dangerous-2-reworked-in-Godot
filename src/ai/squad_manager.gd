@@ -40,6 +40,41 @@ var spacing: float:
 		spacing_level = clampi(int(round((v - SPACING_MIN) / SPACING_STEP)), 0, SPACING_LEVELS)
 
 
+## 0.11.7 Startzustand der Kameraden (docs/status/b0117_squad_start.md), Vorgabe Auftraggeber [D]:
+## Einzelspieler-Originalmissionen und Übungseinsätze starten mit HALTEN + FEUER HALTEN; bis zum ersten Befehl
+## schießen die Kameraden auch unter Beschuss/bei Feindsicht nicht (`SquadBrain.awaiting_order`). Haltung wie der
+## Anführer (stehend). Original: Kommando-Akteure (actors.bin Typ 10) tragen in allen SP-Missionen dieselben sechs Felder
+## (kein Haltungs-/Folge-/Feuerwert je Karte) [B], kein Missionsskript setzt Modus/Haltung der Spielerfiguren [B Suche].
+## Schalter zum alten Stand (B-047: Halten + Feuer frei): `--squad_start=legacy` bzw. START_LEGACY = true.
+const START_LEGACY := false
+
+
+static func start_legacy() -> bool:
+	return START_LEGACY or String(Game.cli.get("squad_start", "")) == "legacy"
+
+
+## Startzustand auf alle KI-Kameraden anwenden (nach set_active(0), vor dem Laden eines Spielstands).
+## Halteplatz wird wie in B-047 erst im ersten Physiktakt übernommen (`_hold_init`), Akteure stehen dann fest.
+func apply_start_state() -> void:
+	if start_legacy():
+		return
+	var lead := leader()
+	for m in members:
+		var b := brain_of(m)
+		if b == null or m == lead or not m.alive:
+			continue
+		b.clear_tasks()
+		b.order = SquadBrain.Order.HOLD
+		b._hold_init = false
+		b.quiet = false
+		b.quiet_fire = false
+		b.strict_hold = false
+		b.stance_override = -1
+		b.roe = SquadBrain.ROE.HOLD_FIRE
+		b.awaiting_order = true      # nach dem roe-Setter (der hebt es auf)
+	orders_changed.emit()
+
+
 func add_member(s: Soldier) -> void:
 	members.append(s)
 	var brain := SquadBrain.new()

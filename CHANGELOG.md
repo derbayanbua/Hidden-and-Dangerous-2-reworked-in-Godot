@@ -2,6 +2,248 @@
 
 
 
+## 0.11.7 (18.11.2026)
+
+**DE**
+- **Testkarte Bavaria:** Panorama-Ring rund um die Karte, Dorf und Werk in der Ferne, Blickschneise, Stollen ausgebaut,
+  Leitern nur noch per Benutzen-Taste; Treibstofftanks in Afrika 1 mit Kollision.
+- **Rückstoß/KI-Zielfehler nach Original-Waffenart:** Waffenart und -klasse kommen jetzt aus der Original-Gegenstandstabelle
+  (belegt): Zielfernrohrgewehre haben den vollen Original-Rückstoß (Faktor 1,0 statt 0,4), die Doppelflinte zählt als
+  Art 3 (0,3); KI-Zielfehler: MGs/BAR wie Original Klasse 4, MP 44 ohne MP-Zuschlag.
+- **Skript-Scheinfeuer (HUMAN_IllFire) wie im Original:** diese Geschosse fliegen durch Figuren, Fahrzeuge und Objekte und
+  treffen nur die Umgebung (Inszenierungen in Alpen, Arktis, Normandie, Tschechien, Afrika).
+- **Tag-/Nachtwechsel je Spielmodus:** neue Server-Regel „T/N MODI“ (Konsole/Config `daynightmodes`, Bitmaske:
+  1 Deathmatch, 2 Team-Deathmatch, 4 Besetzung, 8 HD2-Aufgaben, 16 Kooperativ; Standard 31 = alle, also wie bisher).
+  Wirkt zusammen mit `daynight` auf allen MP-Karten; im LAN-/Internet-Servermenü, im Konfigurationsmenü des dedizierten
+  Servers und in der SPIEL-INFO. Protokoll unverändert (DH2-LAN-6).
+- **Lichtstimmung je Grafikstufe geprüft:** Vergleichsbilder aller fünf Stufen (Himmel/Horizont/Boden, mittlere
+  Helligkeit und Farbe gegen Stufe Hoch) für mehrere Karten; Normandy 3: Schwimmtest im Fluss ergänzt. Behoben:
+  Originalkarten waren auf Ultra/4K Ultra 7–58 % dunkler als auf Hoch (globale Beleuchtung SDFGI verdrängte das
+  Umgebungslicht); dort bleibt SDFGI jetzt aus, Abweichung höchstens 6 %.
+- **Online-Rangliste:** neue Spalte „BOTS“ mit den Abschüssen von KI-Soldaten; „KILLS“ zählt nur Spielerabschüsse.
+- **Einschusslöcher besser erkennbar:** größer (12 cm statt 6 cm), mit fast schwarzem Kern, dunklem ausgefranstem Rand
+  und weichem Schmauchhof, zufällig gedreht; volle Deckkraft auf Schnee, Holz, Metall und Stein, ohne Ausblenden auf
+  Entfernung (auch im Zielfernrohr). Bis zu 160 Löcher/Brandflecken gleichzeitig, die ältesten verschwinden. Gilt für
+  eigene, KI- und Netzschüsse (Einzel- und Mehrspieler).
+- **Minikarte als Server-Option:** neue Regel „MINIKARTE“ im LAN-/Internet-Servermenü, Konsole/Config `minimap 0/1`,
+  Standard aus. Eingeschaltet erscheint die Minikarte links unten direkt über den Spielersymbolen und ersetzt den Kompass;
+  ausgeschaltet bleibt der Kompass wie bisher. Die Regel wird mit den übrigen Serverregeln übertragen (Protokoll
+  unverändert, ältere Clients bleiben kompatibel) und in der SPIEL-INFO angezeigt.
+- **Große Karte (M) mit Markierungen wie die Minikarte:** eigene Position mit Blickrichtung, Verbündete (nur in
+  Teammodi) und kurz (2,5 s) die Lage schießender Gegner – Schalldämpferwaffen bleiben verborgen; Zuschauer sehen die
+  Sicht des beobachteten Spielers, mit freier Kamera keine Marken. Im Mehrspieler öffnet M jetzt auch in Deathmatch
+  und Team-Deathmatch eine Übersichtskarte (mit Spawnzonen wie bisher die Spawnzonen-Karte). Die taktische Karte im
+  Einzelspieler zeigt den aktiven Soldaten als Pfeil und gehörte oder gesehene schießende Gegner auf dieselbe Weise.
+  Unabhängig von der Server-Regel „MINIKARTE“; Protokoll unverändert.
+- **Schießstand:** neue Übungskarte „Schießstand (Test)“ mit Bahnen auf 3, 7, 10, 25, 50, 100, 200 und 300 m. Auf jeder
+  Bahn steht ein unverwundbarer Dummy (echte Soldatenfigur mit allen Trefferzonen), Treffer werden nur protokolliert.
+  Dazu eine optionale Prüfreihe für Balance-Änderungen: alle Handwaffen bis 50 m, Gewehre/Karabiner und
+  Zielfernrohrwaffen bis 300 m, jede Körperzone, stehend/hockend/liegend, gezoomt und ungezoomt; Bericht mit Zone,
+  Abweichung in cm und Schaden.
+- **Zielfernrohr eingeschossen:** Schüsse durch das Zielfernrohr treffen im Einzelspieler jetzt die Zone unter dem
+  Absehen (vorher fiel die Kugel auf 100/200/300 m rund 10/39/86 cm darunter; ein Kopfschuss auf 300 m traf das Bein
+  oder ging vorbei). Neue Einstellung `scope_zero` (Standard an, aus = bisheriges Verhalten). Im Mehrspieler gibt es
+  keinen Zielfernrohr-Ausgleich – die Kugel fällt dort realistisch (für Client, Host und Server-KI gleich).
+- **Schadensabfall der Gewehre realistischer:** Gewehre, Karabiner, Zielfernrohrwaffen, MGs und StG 44 verlieren auf
+  Entfernung nur noch halb so schnell Schaden wie in der Originaltabelle und behalten mindestens 60 % ihres
+  Grundschadens. Ein Kopftreffer mit dem Gewehr bleibt auf 300 m tödlich (z. B. Lee-Enfield 125 statt 2,5), ein
+  Rumpftreffer wirkt deutlich (25 statt 0,5). Pistolen und MPs fallen weiter stark ab wie im Original. Einzel- und
+  Mehrspieler gleich.
+- **Streuung nach Haltung festgelegt:** stehend streuen Waffen etwas mehr als hockend, hockend mehr als liegend (Faktor
+  1 / 0,75 / 0,5; das Original kennt keinen Haltungsfaktor) – für Spieler und KI gleich, im Einzel- und Mehrspieler; der
+  Schießstand prüft die Reihenfolge.
+- **Dedizierter Server hängt nicht mehr:** KI-Soldaten liefen nach einem Karten- oder Rundenwechsel in eine
+  Endlosschleife (Wahrnehmung über bereits gelöschte Soldaten), die den Speicher füllte; außerdem blieb der Server stehen,
+  wenn zwei Kartenwechsel kurz nacheinander kamen (Rundenende und `nextmap`/Abstimmung). Beides behoben; Langlauf über
+  2 Stunden ohne Hänger und ohne Speicheranstieg über die Runden (`docs/status/b0117_server_soak.md`).
+- **Dedizierter Server im Langlauf stabil:** Rauswurf, Ablehnung und Gast-Zeitlimit trennen einen Spieler jetzt nur
+  noch einmal und nur, solange er verbunden ist (vorher eigene Verzögerungen mit `disconnect_peer`, die nach dem Gehen
+  erneut trennten – Fehlerschleife). Beim Verlassen werden alle Spielertabellen des Servers geleert (Generationen,
+  Leichenlagen, Lebenspunkte, Respawn-Zeiten, Admin-Fehlversuche), die Anmeldetabellen bei jedem Neustart; Test- und
+  Diagnoselisten sind begrenzt. Neue Server-Option `--mem_log_s=<s>` schreibt regelmäßig eine Zeile MEMSTAT
+  (Speicher, Objekt-/Knotenzahl, Tabellengrößen). Neuer Langlauftest mit wiederholtem Beitreten, Verlassen, Rauswurf
+  und Kartenwechsel (kurz in `-Full`, über 2 Stunden mit `-Only test_dedicated_soak_long`). Protokoll unverändert.
+- **Soldatenprofil beim Masterserver:** Der Client lädt nach der Anmeldung sein Soldatenprofil hoch (Name, Figur und
+  Klasse aus dem SPIELER-SETUP; `PUT /v1/accounts/me/soldiers/{id}`, signiert mit dem Kontoschlüssel, Versionsstand
+  `rev`) und aktualisiert es, sobald Klasse oder Figur geändert werden. Vorher wurde nie ein Profil gesendet. Anmeldung
+  und Profil-Upload erscheinen im Log (`MASTER: Login ok`, `MASTER: Soldatenprofil gespeichert`).
+- **Abschüsse in der Rangliste:** geprüft – der Rundenbericht meldet Abschüsse menschlicher Gegner als `kills` und
+  Abschüsse von KI-Soldaten getrennt als `ai_kills` (wie im Master-Protokoll festgelegt). Wer nur KI-Soldaten
+  ausschaltet, hat daher `kills` 0; die KI-Abschüsse zählen in `ai_kills` und in die Erfahrung.
+- **KI auf Treppen und Bot-Festhängen:** Treppen der Karten werden jetzt automatisch erkannt und als begehbare Fläche ins
+  Navigationsnetz übernommen (nur für die Wegsuche, keine neue Kollision). Viele Obergeschosse, Podeste und Dächer sind
+  damit für KI-Soldaten erreichbar (Einzel- und Mehrspieler). KI-Soldaten im Mehrspieler bleiben nicht mehr dauerhaft
+  hängen: ein misslungener Kletterversuch setzt die Abhilfe nicht mehr zurück, der Notversatz sucht freie Punkte in der
+  Nähe, danach beginnt die Abhilfe von vorn (vorher bis über 2 Minuten am selben Fleck).
+- **Navigationsnetz am Treppenfuß:** das Netz lag vor vielen Treppen 0,5–0,6 m über dem Boden, KI-Wege endeten dort.
+  Die Höhe wird jetzt nur an den Treppenfüßen auf den Boden korrigiert (kein feineres Netz für die ganze Karte, gleiche
+  Polygonzahl und Wegsuch-Leistung).
+- **KI-Soldaten laufen menschlicher:** Wege führen nicht mehr stur auf der kürzesten Linie. Je Karte entstehen
+  Wegpunkte aus Zonen, Spawnplätzen, Aufgabenorten und dem Navigationsnetz; Bots nehmen bei geringem Umweg oft einen
+  davon mit und laufen leicht versetzt, so dass mehrere Bots verschiedene Wege zum selben Ziel nehmen. Bei bekannter
+  Feindlage bleibt die Deckungsroute. Nur Server, Protokoll unverändert.
+- **Notversatz festhängender Bots sicherer:** der Versatz geht höchstens 4 m zur Seite und 2,5 m in der Höhe, nur auf
+  echten Boden und nur dorthin, von wo das Ziel weiter erreichbar ist (vorher konnte ein Bot durch die Welt fallen oder
+  in eine Senke ohne Weg gesetzt werden). Seitlich versetzte Laufpunkte müssen direkt über das Netz erreichbar sein.
+- **Treppen und Leitern für KI-Soldaten:** zwei Original-Treppen, an denen Soldaten hängen blieben (CZECH1, NORMANDY
+  Mehrspieler), haben jetzt eine unsichtbare Ersatzrampe wie die Originaltreppen. Mehrteilige Leitern an Türmen werden
+  von der KI am Stück geklettert. KI-Soldaten, die zwischen zwei Punkten hin und her pendeln, planen neu oder werden ein
+  Stück weitergesetzt.
+- **Online wie LAN:** Eine Beförderung über den Masterserver (gewertete Online-Runde) wird jetzt wie im LAN auch den
+  übrigen Spielern gemeldet („… wurde befördert zu …“), nicht nur dem Beförderten. Die Rang-Anzeige nutzt dieselbe
+  Bedingung wie Rangmeldung und Rundenbericht (Master-Dienstgrad nur auf offiziellen Internet-Servern, sonst
+  Original-Rang). Spawn-Schutz und die übrigen Mehrspielerregeln gelten im LAN und online gleich (geprüft).
+  Protokoll unverändert.
+- **Tastenbelegung geprüft:** beide Standardbelegungen ohne Doppelbelegung, Umbelegen einer unbelegten Aktion auf eine
+  belegte Taste lässt keine Doppelbelegung zurück, Speichern/Laden/Zurücksetzen vollständig getestet.
+- **LAN-Menü im Original-Look:** LAN-Serverliste und SERVER ERSTELLEN erscheinen ausschließlich als Original-Bildschirme
+  (Grafiken zur Laufzeit aus der eigenen Installation); neuer Prüflauf mit Kontrollbildern.
+- **Treffsicherheit der Gegner wie im Original (Einzelspieler-Originaleinsätze):** Der Zielfehler der KI folgt jetzt der
+  Original-Formel: seitliche Abweichung abhängig vom Wert „Schießen“, der eigenen Haltung und Bewegung, der Zeit seit
+  der Zielaufnahme und der Waffenart, auf „leicht“ doppelt und auf „normal“ 1,5-fach so groß. Granaten der KI landen je
+  nach „Schießen“ bis zu einige Meter neben dem Ziel. Die bisherige eigene Fehlerformel gilt nur noch für Übungseinsätze
+  und Mehrspieler-Bots (`--orig_aim=0` schaltet zurück).
+- **Lippensynchronität:** geprüft und abgeschlossen; Kontrollbilder auch aus einer Zwischensequenz in Nordafrika.
+- **Afrika 6 „Raubvögel“ (Bordschützen in der Ju 88) überarbeitet:** jeder Sitz ist jetzt ein eigener MG-Stand nach dem
+  Originalmodell – das MG schwenkt sichtbar innerhalb der Original-Grenzen, die Ego-Kamera sitzt am Original-Kamerapunkt
+  des MG und blickt in Laufrichtung, die 3. Person nutzt den Original-Kamerapunkt des Sitzes, der Blick bleibt beim
+  Kurvenflug am MG. Geschosse starten an der Mündung, treffen die eigene Ju 88 nicht mehr und das MG zieht beim Dauerfeuer
+  nicht mehr vom Ziel weg (vorher trafen nur wenige Schüsse, Abschüsse waren kaum möglich). KI-Kameraden schießen selbst
+  auf Jäger im Schwenkbereich (ihre Treffer zählen wie im Original nur begrenzt). Jäger zeigen beim Angriff Leuchtspuren,
+  stürzen in Flugrichtung ab; die Ju 88 stürzt bei 0 Lebenspunkten ab, bevor die Mission endet.
+- **Ju-88-Schützen sitzen in der Kanzel:** Die Bordschützen sitzen jetzt (Sitzhaltung, Arme unten) mit den Augen auf
+  Höhe des Ringvisiers; vorher ragten Kopf und Arme des hockenden Schützen in der 3. Person aus der Kanzel.
+- **Blutlachen auf Gras erkennbar:** Lachen reichen sichtbar unter der Leiche hervor und sind kräftiger rot (vorher
+  dunkelrot auf dunklem Gras fast unsichtbar). Blutflecken werden nicht mehr als gestreckte Streifen auf Wandfüße und
+  Kanten quer zur Fläche projiziert.
+- **Waffen toter Soldaten liegen flach:** Nach dem Zur-Ruhe-Kommen der Leiche liegt das Gewehr neben der Hand auf dem
+  Boden, statt senkrecht aus dem Körper zu ragen (Einzel- und Mehrspieler, auch bei späterem Beitritt).
+- **Schwimmen ohne Waffe:** Beim Schwimmen sind Hand- und Rückenwaffe ausgeblendet – vorher ragte nur die Waffe aus dem
+  Wasser. Gilt auch für Mitspieler im Mehrspieler.
+- **Kameraden warten auf den ersten Befehl:** In Einzelspieler-Originalmissionen und Übungseinsätzen halten die
+  KI-Kameraden zu Beginn ihre Position mit „Feuer halten“ und schießen bis zum ersten Befehl auch dann nicht, wenn sie
+  Gegner sehen oder beschossen werden. Jeder Befehl (Folgen, Halten, Feuer frei, Angriff, Aufgaben aus dem Befehlsmenü)
+  hebt das auf. Haltung wie der gesteuerte Soldat. Bisheriges Verhalten (Halten mit Feuer frei) per Startoption
+  `--squad_start=legacy`.
+
+**EN**
+- **Test map Bavaria:** panorama ring around the map, village and works in the distance, sight corridor, tunnel extended,
+  ladders only via the use key; fuel tanks in Africa 1 now have collision.
+- **Squad mates wait for the first order:** In single-player original missions and practice missions the AI squad mates
+  start by holding their position with “Hold fire” and do not shoot before the first order, even when they see enemies
+  or come under fire. Any order (follow, hold, fire at will, attack, tasks from the command menu) lifts this. Stance
+  copies the controlled soldier. Previous behaviour (hold with fire at will) via the start option `--squad_start=legacy`.
+- **Africa 6 “Birds of Prey” (Ju 88 gunners) reworked:** every seat is now its own gun mount based on the original model –
+  the MG visibly traverses within the original limits, the first-person camera sits at the MG's original camera point
+  and looks down the barrel, third person uses the seat's original camera point, and the view stays on the gun while the
+  aircraft turns. Bullets leave the muzzle, no longer hit the own Ju 88, and sustained fire no longer pulls the gun off
+  target (before, only a few rounds hit and kills were hardly possible). AI gunners fire at fighters within their arc
+  (their hits count only to a limited extent, as in the original). Fighters show tracers while attacking and crash in
+  their direction of flight; the Ju 88 crashes at 0 hit points before the mission ends.
+- **Recoil/AI aim error by original weapon type:** weapon type and class now come from the original item table
+  (verified): scoped rifles get the full original recoil (factor 1.0 instead of 0.4), the double-barrel shotgun counts as
+  type 3 (0.3); AI aim error: MGs/BAR use original class 4, MP 44 without the SMG penalty.
+- **Scripted fake fire (HUMAN_IllFire) as in the original:** these bullets pass through characters, vehicles and objects and
+  only hit the environment (staged scenes in the Alps, Arctic, Normandy, Czech and Africa missions).
+- **Day/night cycle per game mode:** new server rule "T/N MODI" (console/config `daynightmodes`, bit mask:
+  1 deathmatch, 2 team deathmatch, 4 occupation, 8 HD2 objectives, 16 cooperative; default 31 = all, i.e. unchanged).
+  Works together with `daynight` on all MP maps; available in the LAN/Internet server menu, the dedicated server
+  configuration and GAME INFO. Protocol unchanged (DH2-LAN-6).
+- **Lighting mood per graphics level checked:** comparison images of all five levels (sky/horizon/ground, mean
+  brightness and colour against level High) for several maps; Normandy 3: swimming test in the river added. Fixed:
+  original maps were 7–58 % darker on Ultra/4K Ultra than on High (SDFGI global illumination replaced the ambient
+  light); SDFGI now stays off there, deviation at most 6 %.
+- **Online leaderboard:** new "BOTS" column with kills of AI soldiers; "KILLS" counts player kills only.
+- **Bullet holes easier to see:** larger (12 cm instead of 6 cm), with a near-black core, dark ragged rim and a soft
+  soot halo, randomly rotated; fully opaque on snow, wood, metal and stone and no fading with distance (also through
+  scopes). Up to 160 holes/scorch marks at once, oldest are removed. Applies to own, AI and network shots (single and
+  multiplayer).
+- **Minimap as a server option:** new rule "MINIKARTE" in the LAN/Internet server menu, console/config `minimap 0/1`,
+  off by default. When enabled, the minimap is shown bottom-left directly above the player icons and replaces the
+  compass; when disabled the compass stays as before. The rule is sent with the other server rules (protocol unchanged,
+  older clients stay compatible) and shown in GAME INFO.
+- **Large map (M) with the same markers as the minimap:** your own position with view direction, allies (team modes
+  only) and, briefly (2.5 s), the position of enemies who fire – silenced weapons stay hidden; spectators see the view
+  of the observed player, free camera shows no markers. In multiplayer, M now also opens an overview map in deathmatch
+  and team deathmatch (with spawn zones it is the spawn zone map as before). The single player tactical map shows the
+  active soldier as an arrow and heard or seen firing enemies the same way. Independent of the server rule
+  "MINIKARTE"; protocol unchanged.
+- **Shooting range:** new practice map "Schießstand (Test)" with lanes at 3, 7, 10, 25, 50, 100, 200 and 300 m. Each
+  lane has an invulnerable dummy (real soldier figure with all hit zones); hits are only logged. Plus an optional test
+  series for balance changes: all small arms up to 50 m, rifles/carbines and scoped weapons up to 300 m, every body
+  zone, standing/crouching/prone, zoomed and unzoomed; report with zone, offset in cm and damage.
+- **Zeroed scopes:** shots through a scope now hit the zone under the reticle in single player (before, the bullet
+  dropped about 10/39/86 cm below it at 100/200/300 m; a head shot at 300 m hit the leg or missed). New setting
+  `scope_zero` (on by default, off = previous behaviour). In multiplayer there is no scope compensation – the bullet
+  drops realistically there (same for client, host and server bots).
+- **Rifle damage falloff more realistic:** rifles, carbines, scoped rifles, machine guns and the StG 44 now lose damage
+  over distance only half as fast as in the original table and keep at least 60 % of their base damage. A head shot
+  with a rifle stays lethal at 300 m (e.g. Lee-Enfield 125 instead of 2.5), a torso hit clearly hurts (25 instead of
+  0.5). Pistols and SMGs keep the original strong falloff. Same in single and multiplayer.
+- **Spread by stance confirmed:** weapons spread a little more standing than crouching, and more crouching than prone
+  (factor 1 / 0.75 / 0.5; the original has no stance factor) – same for players and AI, in single and multiplayer; the
+  shooting range checks the order.
+- **Dedicated server no longer hangs:** after a map or round change, bots ran into an endless loop (perception over
+  already deleted soldiers) that filled memory; the server also froze when two map changes came shortly after each other
+  (round end and `nextmap`/vote). Both fixed; soak run over 2 hours without hangs and without memory growth across rounds
+  (`docs/status/b0117_server_soak.md`).
+- **Dedicated server stable in long runs:** kicks, rejections and the guest timeout now drop a player only once and
+  only while still connected (before, separate delayed `disconnect_peer` calls dropped again after the player had left –
+  error loop). Leaving clears all per-player server tables (generations, corpse poses, health, respawn times, admin
+  login failures), the auth tables are cleared on every restart, and test/diagnostic lists are bounded. New server
+  option `--mem_log_s=<s>` prints a periodic MEMSTAT line (memory, object/node count, table sizes). New soak test with
+  repeated join, leave, kick and map change (short in `-Full`, over 2 hours with `-Only test_dedicated_soak_long`).
+  Protocol unchanged.
+- **Soldier profile on the master server:** after logging in, the client uploads its soldier profile (name, figure
+  and class from PLAYER SETUP; `PUT /v1/accounts/me/soldiers/{id}`, signed with the account key, revision `rev`) and
+  updates it whenever class or figure change. Before, no profile was ever sent. Login and profile upload are logged
+  (`MASTER: Login ok`, `MASTER: soldier profile saved`).
+- **Kills in the ranking:** checked – the match report sends kills of human opponents as `kills` and kills of AI
+  soldiers separately as `ai_kills` (as defined by the master protocol). Players who only kill AI soldiers therefore
+  have `kills` 0; those kills count in `ai_kills` and towards experience.
+- **AI on stairs and bot stuck fixes:** map stairs are now detected automatically and added to the navigation mesh as
+  walkable surface (path finding only, no new collision). Many upper floors, landings and roofs are now reachable for AI
+  soldiers (single and multiplayer). Multiplayer AI soldiers no longer stay stuck indefinitely: a failed climb attempt no
+  longer resets the recovery, the emergency nudge searches free points nearby, and the recovery then starts over
+  (before, bots could stand on the same spot for over 2 minutes).
+- **Safer emergency nudge for stuck bots:** the nudge moves at most 4 m sideways and 2.5 m vertically, only onto real
+  ground and only to spots from which the goal stays reachable (before, a bot could fall through the world or be put into
+  a dip without a path). Lateral route offsets must be directly reachable over the navigation mesh.
+- **Navigation mesh at stair feet:** in front of many stairs the mesh was 0.5–0.6 m above the ground and AI paths ended
+  there. The height is now corrected to the ground only at stair feet (no finer mesh for the whole map, same polygon
+  count and path search performance).
+- **More human bot movement:** routes no longer follow the shortest line rigidly. Per map, waypoints are built from
+  zones, spawn slots, objective locations and the navigation mesh; with a small detour bots often pass one of them and
+  walk slightly offset, so several bots take different routes to the same goal. With a known enemy position the cover
+  route stays. Server only, protocol unchanged.
+- **Stairs and ladders for AI soldiers:** two original stairs where soldiers got stuck (CZECH1, NORMANDY multiplayer)
+  now have an invisible replacement ramp like the original stairs. Multi-part ladders on towers are climbed by the AI
+  in one go. AI soldiers oscillating between two points re-plan or are moved a short distance onward.
+- **Online same as LAN:** a promotion from the master server (ranked online round) is now announced to the other
+  players as well ("… was promoted to …"), like in LAN, not only to the promoted player. The rank display uses the same
+  condition as the rank message and the match report (master rank only on official internet servers, otherwise the
+  original rank). Spawn protection and the other multiplayer rules are the same in LAN and online (checked). Protocol
+  unchanged.
+- **Key bindings checked:** both default layouts have no duplicate keys, rebinding an unbound action to a used key no
+  longer leaves a duplicate, saving/loading/reset fully tested.
+- **LAN menu in the original look:** the LAN server list and CREATE SERVER are shown only as original screens (graphics
+  loaded at runtime from your own installation); new check run with control images.
+- **Enemy accuracy as in the original (single-player original missions):** AI aiming error now follows the original
+  formula: sideways deviation depending on the "Shooting" value, own stance and movement, time since acquiring the
+  target and weapon type; doubled on "easy" and ×1.5 on "normal". AI grenades land up to a few metres off target
+  depending on "Shooting". The previous custom error formula remains only for practice missions and multiplayer bots
+  (`--orig_aim=0` switches back).
+- **Lip sync:** checked and completed; control images also from a cutscene in North Africa.
+- **Ju 88 gunners sit inside the turret:** the gunners now sit (seated pose, arms down) with their eyes at the ring
+  sight; previously head and arms of the crouching gunner stuck out of the canopy in third person.
+- **Blood pools visible on grass:** pools now extend visibly from under the corpse and are a stronger red (previously
+  dark red on dark grass was nearly invisible). Blood splats are no longer projected as stretched streaks onto wall bases
+  and edges perpendicular to them.
+- **Dead soldiers' weapons lie flat:** once the corpse comes to rest, the rifle lies on the ground next to the hand
+  instead of sticking straight up out of the body (single and multiplayer, also for late joiners).
+- **Swimming without a weapon:** hand and back weapons are hidden while swimming – previously only the weapon stuck
+  out of the water. Also applies to other players in multiplayer.
+
 ## 0.11.6 (15.11.2026)
 
 **DE**

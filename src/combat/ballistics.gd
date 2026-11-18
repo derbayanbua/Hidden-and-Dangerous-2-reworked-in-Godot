@@ -27,6 +27,10 @@ class Projectile:
 	var space: PhysicsDirectSpaceState3D
 	var world: World3D
 	var whizzed := false
+	## 0.11.7 (B-051) [B]: HUMAN_IllFire-Geschoss (hd2.exe Geschoss +0x6C, gesetzt über Controller +0xB4 → 0x58BAF0 →
+	## Waffe vtable+0x24 0x7D4FD0 → 0x451100 → 0x450D30 → 0x44B030/0x4482A0). Im Flugschritt 0x44B910 wird bei gesetztem
+	## Byte jeder Treffer auf einen Akteur (Mensch, Fahrzeug, Skriptobjekt) übersprungen; nur Weltgeometrie stoppt es.
+	var pass_actors := false
 
 var _projectiles: Array[Projectile] = []
 ## Einschlag eines Geschosses (Welt oder Trefferzone): Punkt, Kollider, Schütze (Tests: test_aim_ballistics)
@@ -61,6 +65,8 @@ func fire(shooter: Node, origin: Vector3, direction: Vector3, data: WeaponData, 
 	p.team = team
 	p.exclude = exclude
 	p.world = (shooter as Node3D).get_world_3d()
+	p.pass_actors = shooter != null and bool(shooter.get_meta("illfire_shots", false)) \
+		and String(Game.cli.get("illfire_pass", "1")) != "0"
 	_projectiles.append(p)
 	shots_fired += 1
 
@@ -106,6 +112,22 @@ static func compensation_enabled() -> bool:
 	if Net.is_online:
 		return bool(Net.rule("precise_aim"))
 	return Settings.precise_aim
+
+
+## 0.11.7 [D] (Schießstand-Kalibrierung, docs/status/test_range.md): Zielfernrohr „eingeschossen“. Schuss durch ein
+## Zielfernrohr (Absehen 0–3, voll gezoomt) gleicht den Kugelfall bis zum Punkt unter dem Absehen aus – wie ein auf die
+## Entfernung gestelltes Absehen. Ursache des Befunds: ohne Ausgleich fällt die Kugel (Original 9,8 m/s², 0x44B910) auf
+## 100/200/300 m ≈ 10/39/86 cm unter das Absehen (Kopf → Rumpf/Bein/vorbei). Einzelspieler: Option
+## Settings.scope_zero (Standard an). Mehrspieler [D]: NIE – die Kugel fällt dort realistisch unter das Absehen, für
+## Client, Host und Server-Bots gleich (Net.is_online gilt überall), unabhängig von Settings.scope_zero und der Regel
+## „precise_aim“ (die wirkt im MP nur noch über compensation_enabled, nicht als Zielfernrohr-Ausgleich).
+## force_compensation (Tests) gilt auch hier.
+static func scope_compensation_enabled() -> bool:
+	if force_compensation >= 0:
+		return force_compensation == 1
+	if Net.is_online:
+		return false
+	return Settings.precise_aim or Settings.scope_zero
 
 
 ## Abschussrichtung, mit der das Geschoss (Schwerkraft/Widerstand wie _step) den Zielpunkt 	arget trifft –
@@ -227,6 +249,22 @@ static func _sp_squad_pass(p: Projectile, hb: Hitbox) -> bool:
 	return WeaponDB.orig_side(p.shooter) == 1 and WeaponDB.orig_side(hb.soldier) == 1
 
 
+## B-051: Kollider gehört zu einem Akteur (Trefferzone, Fahrzeug, zerstörbares/Skriptobjekt) – nicht zur Weltgeometrie
+func _is_actor_hit(collider: Object) -> bool:
+	if collider is Hitbox:
+		return true
+	var n := collider as Node
+	if n and n.has_meta("hit_proxy"):
+		return true
+	for i in 4:
+		if n == null:
+			return false
+		if n is Soldier or n is VehicleBody3D or n.has_method("projectile_hit") or n.has_method("on_bullet_hit"):
+			return true
+		n = n.get_parent()
+	return false
+
+
 ## Gibt true zurück, solange das Projektil weiterfliegt.
 func _step(p: Projectile, delta: float) -> bool:
 	p.age += delta
@@ -249,6 +287,16 @@ func _step(p: Projectile, delta: float) -> bool:
 	while not hit.is_empty() and hit.collider is Hitbox and p.shooter != null \
 			and (hit.collider as Hitbox).soldier == p.shooter:
 		p.exclude.append((hit.collider as Hitbox).get_rid())
+		q.exclude = p.exclude
+		hit = space.intersect_ray(q)
+	# B-051 [B]: IllFire-Geschosse fliegen durch alle Akteure (0x44B910: Byte +0x6C überspringt den Akteurzweig)
+	var guard := 0
+	while p.pass_actors and not hit.is_empty() and _is_actor_hit(hit.collider) and guard < 16:
+		guard += 1
+		var rid: RID = (hit.collider as CollisionObject3D).get_rid() if hit.collider is CollisionObject3D else RID()
+		if not rid.is_valid():
+			break
+		p.exclude.append(rid)
 		q.exclude = p.exclude
 		hit = space.intersect_ray(q)
 	_whizz(p, next)

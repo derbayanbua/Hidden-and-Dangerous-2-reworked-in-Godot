@@ -671,6 +671,7 @@ func freeze() -> void:
 	settled_at = soldier.global_position
 	frozen_pose = export_pose()
 	_place_search_points()
+	_lay_weapon()
 	settled.emit(frozen_pose)
 	if authoritative and Net.is_online:
 		Net.corpse_settled(soldier, frozen_pose)
@@ -696,6 +697,13 @@ func _ground_below(p: Vector3) -> Vector3:
 	var space := sk.get_world_3d().direct_space_state
 	var h := space.intersect_ray(PhysicsRayQueryParameters3D.create(p + Vector3.UP * 0.5, p + Vector3.DOWN * 3.0, 1))
 	return h.position if not h.is_empty() else Vector3(p.x, p.y - 0.2, p.z)
+
+
+## 0.11.7: Handwaffe flach neben die Leiche (SoldierModel.lay_weapon_flat)
+func _lay_weapon() -> void:
+	var m := get_parent()
+	if m != null and m.has_method("lay_weapon_flat"):
+		m.call("lay_weapon_flat")
 
 
 ## Durchsuchen-Punkte (Pickups.Loot, FieldInventory.SearchSpot) an die liegende Leiche
@@ -746,6 +754,7 @@ func apply_pose(pose: PackedFloat32Array, set_origin := true) -> bool:
 	frozen_pose = pose
 	settled_at = soldier.global_position
 	_place_search_points()
+	_lay_weapon()
 	stats["net_poses"] += 1
 	return true
 

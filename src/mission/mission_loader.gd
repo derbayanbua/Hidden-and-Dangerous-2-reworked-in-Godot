@@ -132,13 +132,25 @@ static func clear_cache() -> void:
 func begin(id: String) -> void:
 	_gen += 1
 	var gen := _gen
+	Net.soak_trace("loader enter task=%d" % _task)
 	if _task >= 0:
-		WorkerThreadPool.wait_for_group_task_completion(_task)      # laufende Aufgabe sauber beenden
-		_task = -1
+		# 0.11.7: laufendes Parsen NICHT blockierend abwarten – der Hauptthread blieb sonst in
+		# wait_for_group_task_completion stehen, während das glTF-Parsen selbst auf den Hauptthread wartet
+		# (Deadlock bei Rundenende + nextmap/Abstimmung kurz nacheinander, dedizierter Server Soak 0.11.7).
+		# Wait for a running parse without blocking the main thread (deadlock on overlapping map loads).
+		var t := _task
+		while not WorkerThreadPool.is_group_task_completed(t):
+			await get_tree().process_frame
+		if _task == t:
+			WorkerThreadPool.wait_for_group_task_completion(t)      # abgeschlossen: kehrt sofort zurück
+			_task = -1
+		if gen != _gen:
+			return
 	mission_id = id
 	_t0 = Time.get_ticks_msec()
 	timing = {}
 	_phase = "unload"
+	Net.soak_trace("loader begin " + id)
 	_show(id)
 	# alte Szene sofort entladen: Netz/Skripte sehen keine alte Mission mehr (SceneTree setzt current_scene beim
 	# Verlassen des Baums auf null)
@@ -149,7 +161,9 @@ func begin(id: String) -> void:
 	await get_tree().process_frame
 	if gen != _gen:
 		return
+	Net.soak_trace("loader collect " + id)
 	_collect(id)
+	Net.soak_trace("loader parse %d files" % _files.size())
 	_phase = "parse"
 	# Während des Vorladens zeigt der Hauptthread nur den Ladebildschirm: Bildrate begrenzen (Rechenzeit für die
 	# Arbeits-Threads; Bildzahl-basierte Warteschleifen der Tests laufen nicht leer)
@@ -162,7 +176,7 @@ func begin(id: String) -> void:
 			_progress(0.05 + 0.8 * float(_done_bytes) / float(_total_bytes))
 			await get_tree().process_frame
 			if gen != _gen:
-				break
+				return                # 0.11.7: neuer Ladevorgang wartet die Aufgabe ohne Blockade ab
 		if _task == task:             # sonst hat ein neuer Ladevorgang bereits darauf gewartet
 			WorkerThreadPool.wait_for_group_task_completion(task)
 			_task = -1
@@ -173,6 +187,7 @@ func begin(id: String) -> void:
 		OrigLevel.clear_hq_cache()   # B-039: HD-Bilder nur fürs Parsen; Vorlagen halten die Texturen (RAM)
 	_t_parse = Time.get_ticks_msec() - _t0
 	_phase = "build"
+	Net.soak_trace("loader build")
 	_progress(0.85, SAS.text(8904, "Mission wird geladen"))
 	await get_tree().process_frame
 	await get_tree().process_frame

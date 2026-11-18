@@ -173,6 +173,19 @@ func _run() -> void:
 	# SPIEL-INFO-Daten
 	var r: Dictionary = Net.server_info().get("rules", {})
 	check(bool(r.get("day_night", false)) and int(r.get("dn_cycle_min", 0)) == 60, "Serverinfo (SPIEL-INFO) meldet Tag/Nacht")
+	# 0.11.7: Regel je Spielmodus (daynightmodes, Standard 31 = alle)
+	check(int(Net.rule("dn_modes")) == 31 and int(r.get("dn_modes", 0)) == 31, "Standard daynightmodes = 31 (alle Modi)")
+	var ok_all := true
+	for md in 5:
+		ok_all = ok_all and Net.day_night_for(md)
+	check(ok_all, "Standard: Tag/Nacht in allen Spielmodi")
+	var rep2 := Net.server_command("daynightmodes 5")
+	check(int(Net.rule("dn_modes")) == 5, "Konsole: daynightmodes 5 → " + rep2)
+	check(Net.day_night_for(Net.Mode.DEATHMATCH) and not Net.day_night_for(Net.Mode.TEAM_DEATHMATCH) \
+		and Net.day_night_for(Net.Mode.OCCUPATION) and not Net.day_night_for(Net.Mode.COOP), "Maske 5: DM + Besetzung an, TDM/Coop aus")
+	check(not MpDN.wanted(m), "TDM-Server mit Maske 5: kein Tag/Nacht")
+	Net.server_command("daynightmodes 31")
+	check(MpDN.wanted(m), "Maske 31: Tag/Nacht wieder erlaubt")
 	# (4) Spät-Beitritt: Zeit vorher verstellt
 	dn.set_hour(3.0)
 	var args := ["--headless", "--log-file", ProjectSettings.globalize_path("res://test_output/mp_daynight_client.log"),

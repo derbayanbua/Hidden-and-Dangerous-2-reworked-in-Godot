@@ -57,8 +57,10 @@ var _precise: CheckBox             ## preciseaim (Ergänzung 0.10.1)
 var _day_start: SpinBox            ## daystart: Startstunde (Karten mit Tageszyklus)
 var _day_cycle: SpinBox            ## daycycle: Minuten je 24 h, 0 = feste Zeit
 var _dn_on: CheckBox               ## 0.11.5 daynight: Tag-/Nachtwechsel auf allen Karten (nur MP)
+var _minimap: CheckBox             ## 0.11.7 minimap: Minikarte links unten statt Kompass (Standard aus)
 var _dn_start: SpinBox             ## daynightstart: Startstunde, −1 = Kartenstimmung
 var _dn_cycle: SpinBox             ## daynightcycle: Minuten je 24 h
+var _dn_modes: SpinBox             ## 0.11.7 daynightmodes: Bitmaske der Spielmodi (31 = alle)
 ## 0.11.1: Formular = Datenmodell; sichtbar ist der Original-Bildschirm CreateServerScreen (create server.4ds)
 var create_screen: CreateServerScreen
 var _form: Control
@@ -344,6 +346,12 @@ func open() -> void:
 	_dn_start.tooltip_text = "Uhrzeit bei Rundenbeginn, -1 = Originalstimmung der Karte (daynightstart)"
 	_dn_cycle = _spin(g, "T/N ZYKLUS [min]", 1, 240, int(Net.DAYNIGHT_DEFAULTS["dn_cycle_min"]))
 	_dn_cycle.tooltip_text = "Echtzeit-Minuten für 24 Stunden (daynightcycle)"
+	# 0.11.7: je Spielmodus (Bitmaske, 31 = alle)
+	_dn_modes = _spin(g, "T/N MODI", 0, 31, int(Net.DAYNIGHT_DEFAULTS["dn_modes"]))
+	_dn_modes.tooltip_text = "Spielmodi mit Tag/Nacht, Summe: 1 DM, 2 TDM, 4 Besetzung, 8 Aufgaben, 16 Coop (daynightmodes)"
+	# 0.11.7: Minikarte (minimap), Standard aus; an = Minikarte links unten statt Kompass
+	_minimap = _check(g, "MINIKARTE", bool(Net.MINIMAP_DEFAULTS["minimap"]))
+	_minimap.tooltip_text = "Minikarte links unten statt Kompass (minimap)"
 	# 0.10.3: Konfigurationsmenü des dedizierten Servers (ServerLauncher-Nachbau) – letzte Formularzeile, damit die
 	# Original-Felder und die Höhe der Bildlaufliste unverändert bleiben (test_lan_e2e)
 	_label(g, tr("DEDIZIERTER SERVER"))
@@ -746,7 +754,8 @@ func server_settings() -> Dictionary:
 		# 0.10.1: Regel „precise_aim“ (Kugelfall-Ausgleich, für alle gleich); Vorgabe = Option „Präzises Zielen“ des Hosts
 		"precise_aim": _precise.button_pressed,
 		"day_start_h": int(_day_start.value), "day_cycle_min": int(_day_cycle.value),
-		"day_night": _dn_on.button_pressed, "dn_start_h": int(_dn_start.value), "dn_cycle_min": int(_dn_cycle.value)}
+		"day_night": _dn_on.button_pressed, "dn_start_h": int(_dn_start.value), "dn_cycle_min": int(_dn_cycle.value),
+		"dn_modes": int(_dn_modes.value), "minimap": _minimap.button_pressed}
 
 
 ## Konfigurationsdatei im Original-ServerLauncher-Stil (Konsolenzeilen) für den dedizierten Server

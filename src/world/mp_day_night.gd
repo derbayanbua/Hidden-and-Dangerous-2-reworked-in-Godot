@@ -44,7 +44,7 @@ var _set := {}                      ## zuletzt gesetzte Werte (fremde Neusetzung
 static func wanted(m: Node) -> bool:
 	if not Net.is_online or m == null:
 		return false
-	if not bool(Net.rule("day_night")):
+	if not Net.day_night_for(Net.mode()):          # 0.11.7: an/aus je Spielmodus (daynightmodes)
 		return false
 	return m.get("day_night") == null
 

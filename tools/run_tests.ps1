@@ -4,8 +4,9 @@
 #    Es läuft immer nur eine Suite gleichzeitig.
 #  - Zeitlimit je Suite (Standard 900 s, Eintrag `timeout`): bei Hänger wird nur der eigene Prozessbaum beendet, Suite = Fehler.
 #  - Bestanden nur mit Exit 0 UND `ERGEBNIS`-Zeile mit 0 Fehlschlägen.
+#  - -ExtraArgs "--maps=a1_blizzard" haengt Argumente an jede Suite an (z. B. einzelne Karte; Godot-CLI: letzter Wert gilt).
 #  - -Full nimmt zusätzlich die langen Suiten (Gruppe "full": Treppen aller Karten, MP-Navigation, Kollision, Löser) auf.
-param([string]$Exe = "", [switch]$Full, [string[]]$Only = @(), [string[]]$Exclude = @(), [int]$TimeoutSec = 900)
+param([string]$Exe = "", [switch]$Full, [string[]]$Only = @(), [string[]]$Exclude = @(), [int]$TimeoutSec = 900, [string]$ExtraArgs = "")
 $proj = Split-Path $PSScriptRoot -Parent
 . "$PSScriptRoot\test_lock.ps1"
 New-Item -ItemType Directory -Force "$proj\test_output" | Out-Null
@@ -27,6 +28,7 @@ $suites = @(
   @{ name = "test_audio";    args = "--headless -- --mission=a1_blizzard --autoplay=test_audio" },
   @{ name = "test_ai";       args = "--headless -- --mission=a1_blizzard --autoplay=test_ai" },
   @{ name = "test_ai_fsm";   args = "--headless -- --mission=a1_blizzard --autoplay=test_ai --phase=fsm" },
+  @{ name = "test_ai_aim";   args = "--headless -- --mission=a1_blizzard --autoplay=test_ai --phase=aim" },   # 0.11.7 KI-Zielfehler 0x5722B0
   @{ name = "test_ai_ap6";   args = "--headless -- --mission=a1_blizzard --autoplay=test_ai --phase=ap6" },
   @{ name = "test_b044";     args = "--headless -- --mission=a1_blizzard --autoplay=test_b044" },   # B-044 Gegner-Stillstand
   @{ name = "test_ally_no2"; args = "--headless -- --mission=no2_schwerttaenzer --autoplay=test_ally_no2" },   # 0.10.1 Verbündete Schwerttänzer
@@ -41,10 +43,13 @@ $suites = @(
   @{ name = "test_af1_defenders"; args = "--headless -- --mission=af1_spaghetti_airport --autoplay=test_af1_defenders" },
   @{ name = "test_script_systems"; args = "--headless -- --mission=a1_blizzard --autoplay=test_script_systems" },
   @{ name = "test_commands_orig"; args = "--headless -- --mission=a1_blizzard --autoplay=test_commands_orig" },
+  @{ name = "test_squad_start"; args = "--headless -- --mission=a1_blizzard --autoplay=test_squad_start" },
   @{ name = "test_sp_weapons"; args = "--headless -- --mission=a1_blizzard --autoplay=test_sp_weapons" },
   @{ name = "test_aim_ballistics"; args = "--headless -- --mission=a1_blizzard --autoplay=test_aim_ballistics" },   # 0.10.1 Visier/Ballistik/Muendungsfeuer/Atem
   @{ name = "test_weapons_aim"; args = "--headless -- --mission=a1_blizzard --autoplay=test_weapons_aim"; timeout = 1800 },   # 0.11.6 Visier = Einschlag (SP)
   @{ name = "test_weapons_aim_mp"; args = "--headless -- --autoplay=test_weapons_aim --phase=mp"; mp = $true; timeout = 1800 },   # 0.11.6 Visier = Einschlag (MP Host/Client)
+  @{ name = "test_range"; args = "--headless -- --mission=test_range --autoplay=test_range --test_timeout=36000"; group = "range"; timeout = 36600 },   # 0.11.7 Schiessstand, optional (nur -Only test_range)
+  @{ name = "test_range_zonen"; args = "--headless -- --mission=test_range --autoplay=test_range --phase=zonen --weapons=enfield,kar98k,garand,o_17,o_28 --dists=100,200,300 --modes=zoom --stances=steh --test_timeout=3000"; group = "range"; timeout = 3600 },   # 0.11.7 Teillauf Gewehre/Sniper 100-300 m
   @{ name = "test_a2";       args = "--headless -- --mission=a2_erkundung --autoplay=test_orig_part --commandos=1" },
   @{ name = "test_a2_interaktiv"; args = "--headless -- --mission=a2_erkundung --autoplay=test_a2" },
   @{ name = "test_a3";       args = "--headless -- --mission=a3_rendezvous --autoplay=test_orig_part --commandos=4" },
@@ -78,6 +83,7 @@ $suites = @(
   @{ name = "test_b017_mp"; args = "--headless -- --autoplay=test_b017 --phase=mp_markers"; mp = $true },
   @{ name = "test_no2_final"; args = "--headless -- --mission=no2_schwerttaenzer --autoplay=test_no2_final --test_timeout=900"; timeout = 1200 },
   @{ name = "test_af6";     args = "--headless -- --mission=af6_raubvoegel --autoplay=test_af6" },
+  @{ name = "test_af1_fuel_tanks"; args = "--headless -- --mission=af1_spaghetti_airport --autoplay=test_af1_fuel_tanks"; timeout = 1700 },   # Treibstofftanks: Kollision/Navmesh/Zerstörung (Mischmaterial-Meshes)
   @{ name = "test_af1_finale"; args = "--headless -- --mission=af1_spaghetti_airport --autoplay=test_af1_finale" },
   @{ name = "test_af_air";   args = "--headless -- --mission=af2_flugschau --autoplay=test_af_air" },
   @{ name = "test_items";    args = "--headless -- --mission=af1_spaghetti_airport --autoplay=test_items" },
@@ -102,6 +108,7 @@ $suites = @(
   @{ name = "test_career"; args = "--headless -- --autoplay=test_career --profiles_dir=user://test_career --noimport" },   # 0.11.1 Karriere-XP
   @{ name = "test_surrender"; args = "--headless -- --mission=m01_funkfeuer --autoplay=test_surrender" },
   @{ name = "test_blood";    args = "--headless -- --mission=m01_funkfeuer --autoplay=test_blood --profiles_dir=user://test_blut" },
+  @{ name = "test_impacts";  args = "--headless -- --mission=m01_funkfeuer --autoplay=test_impacts --profiles_dir=user://test_impacts" },
   @{ name = "test_weapons_orig"; args = "--headless -- --mission=m01_funkfeuer --autoplay=test_weapons_orig" },
   @{ name = "test_animations"; args = "--headless -- --mission=m01_funkfeuer --autoplay=test_animations" },
   @{ name = "test_ragdoll";  args = "--headless -- --mission=m01_funkfeuer --autoplay=test_ragdoll" },
@@ -128,10 +135,17 @@ $suites = @(
   @{ name = "test_mp_weapons"; args = "--headless -- --autoplay=test_mp_weapons --phase=all"; mp = $true },
   @{ name = "test_dedicated"; args = "--headless -- --autoplay=test_dedicated --profiles_dir=user://test_ded --noimport"; mp = $true },
   @{ name = "test_dedicated_spawn"; args = "--headless -- --autoplay=test_dedicated_spawn --setup_gate=1 --profiles_dir=user://test_ded_spawn --noimport"; mp = $true; timeout = 2500 },   # 0.11.6 Spawn auf dediziertem Server mit Setup-Sperre
+  @{ name = "test_dedicated_soak"; args = "--headless -- --autoplay=test_dedicated_soak --soak_min=12 --mem_log_s=15 --profiles_dir=user://test_ded_soak --noimport"; mp = $true; group = "full"; timeout = 2400 },   # 0.11.7 Langlauf kurz (nur -Full)
+  @{ name = "test_dedicated_soak_long"; args = "--headless -- --autoplay=test_dedicated_soak --soak_min=130 --mem_log_s=60 --soak_tag=long --profiles_dir=user://test_ded_soak --noimport"; mp = $true; group = "soak"; timeout = 10800 },   # 0.11.7 Langlauf >= 2 h (nur -Only)
   @{ name = "test_dedicated_ui"; args = "--headless -- --autoplay=test_dedicated_ui --profiles_dir=user://test_ded_ui --noimport"; mp = $true },   # 0.10.3 Konfigurationsmenue dedizierter Server
   @{ name = "test_mp_setup_ui"; args = "--headless -- --autoplay=test_mp_setup_ui --profiles_dir=user://test_mp_setup --noimport"; mp = $true },
   @{ name = "test_leaderboard"; args = "--headless -- --autoplay=test_leaderboard --profiles_dir=user://test_leaderboard --noimport" },   # 0.11.5 Rangliste (lokaler Master-Nachbau)
   @{ name = "test_mp_browser"; args = "--headless -- --autoplay=test_mp_browser --profiles_dir=user://test_mp_browser --noimport --setup_gate=1"; mp = $true },   # 0.11.1 Serverbrowser + Setup vor Spawn
+  @{ name = "shots_lan_menu"; args = "--headless -- --autoplay=shots_lan_menu --profiles_dir=user://shots_lan_menu --noimport"; mp = $true },   # 0.11.7 LAN-Menue Original-Look
+  # 0.11.7 Fensterlaeufe mit Kontrollbildern (Gruppe "shots", nur bei ausdruecklicher Nennung in -Only)
+  @{ name = "shots_lan_menu_win"; args = "-- --autoplay=shots_lan_menu --shots=1 --profiles_dir=user://shots_lan_menu --noimport"; mp = $true; group = "shots" },
+  @{ name = "shots_blood_god"; args = "-- --mission=m01_funkfeuer --autoplay=shots_blood_god --profiles_dir=user://test_blut"; group = "shots" },
+  @{ name = "test_af6_win"; args = "-- --mission=af6_raubvoegel --autoplay=test_af6 --shots=1"; group = "shots" },
   @{ name = "test_mp_feedback"; args = "--headless -- --autoplay=test_mp_feedback"; mp = $true },
   @{ name = "test_mp_minimap"; args = "--headless -- --autoplay=test_mp_minimap"; mp = $true },
   @{ name = "test_support_strike"; args = "--headless -- --autoplay=test_support_strike"; mp = $true },
@@ -146,7 +160,10 @@ $suites = @(
   @{ name = "test_bavaria_ground_mg42"; args = "--headless -- --mission=bavaria_occupation --autoplay=test_bavaria_ground_mg42"; timeout = 1200 },
   @{ name = "test_bavaria_clipping"; args = "--headless -- --mission=bavaria --autoplay=test_bavaria_clipping"; timeout = 1500 },
   @{ name = "test_bavaria_daynight"; args = "--headless -- --mission=bavaria --autoplay=test_bavaria_daynight"; timeout = 1200 },
-  @{ name = "test_bavaria_tunnels"; args = "--headless -- --mission=bavaria --autoplay=test_bavaria_tunnels"; timeout = 1200 },
+  @{ name = "test_bavaria_landmark"; args = "--headless -- --mission=bavaria --autoplay=test_bavaria_landmark"; timeout = 1200 },
+  @{ name = "test_bavaria_factory"; args = "--headless -- --mission=bavaria --autoplay=test_bavaria_factory"; timeout = 1200 },
+  @{ name = "test_bavaria_panorama_ring"; args = "--headless -- --mission=bavaria --autoplay=test_bavaria_panorama_ring"; timeout = 1200 },
+  @{ name = "test_bavaria_tunnels"; args = "--headless -- --mission=bavaria --autoplay=test_bavaria_tunnels"; timeout = 1500 },
   @{ name = "test_bavaria_integration"; args = "--headless -- --autoplay=test_bavaria_integration"; mp = $true; timeout = 1800 },
   @{ name = "test_bavaria_mp"; args = "--headless -- --autoplay=test_bavaria_mp"; mp = $true; group = "full"; timeout = 1800 },
   # --- Gruppe "full" (nur mit -Full): lange Läufe ---
@@ -163,6 +180,12 @@ foreach ($s in $suites) {
 }
 if (-not $Full) { $suites = @($suites | Where-Object { $_.group -ne "full" }) }
 $Only = @($Only | ForEach-Object { $_ -split ',' } | Where-Object { $_ })   # -File übergibt "a,b" als einen String
+# Gruppe "range" (Schiessstand, optional bei Balance-Aenderungen): nur bei ausdruecklicher Nennung in -Only
+$suites = @($suites | Where-Object { $_.group -ne "range" -or $Only -contains $_.name })
+# Gruppe "soak" (0.11.7 Langlauf >= 2 h): ebenfalls nur bei ausdruecklicher Nennung in -Only
+$suites = @($suites | Where-Object { $_.group -ne "soak" -or $Only -contains $_.name })
+# Gruppe "shots" (0.11.7 Fensterlaeufe mit Kontrollbildern): nur bei ausdruecklicher Nennung in -Only
+$suites = @($suites | Where-Object { $_.group -ne "shots" -or $Only -contains $_.name })
 if ($Only.Count -gt 0) { $suites = @($suites | Where-Object { $Only -contains $_.name }) }
 $Exclude = @($Exclude | ForEach-Object { $_ -split ',' } | Where-Object { $_ })   # -Exclude test_mp_coop: Suiten auslassen
 if ($Exclude.Count -gt 0) { $suites = @($suites | Where-Object { $Exclude -notcontains $_.name }) }
@@ -180,7 +203,7 @@ foreach ($s in $suites) {
   $log = "$proj\test_output\$($s.name).log"
   $limit = if ($s.timeout) { [int]$s.timeout } else { $TimeoutSec }
   $slots = Get-TestSlots -Proj $proj -Name $lockName -Count ($(if ($s.mp) { 2 } else { 1 }))
-  try { $r = Invoke-GodotSuite -Proj $proj -GodotArgs $s.args -Log $log -TimeoutSec $limit -Slots $slots -Exe $Exe }
+  try { $r = Invoke-GodotSuite -Proj $proj -GodotArgs ($s.args + $(if ($ExtraArgs) { " " + $ExtraArgs } else { "" })) -Log $log -TimeoutSec $limit -Slots $slots -Exe $Exe }
   finally { Release-TestSlots -Slots $slots -Name $lockName }
   $res = Read-SuiteResult -Log $log -Code $r.code -TimedOut $r.timeout
   "{0,-24} Exit {1,-3} {2,5}s  {3}" -f $s.name, $r.code, $r.seconds, $res.summary

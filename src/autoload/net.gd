@@ -64,6 +64,11 @@ const RULE_KEYS := {
 	# 0.11.5 (Ergänzung): Tag-/Nachtwechsel auf ALLEN Karten (nur MP, src/world/mp_day_night.gd): an/aus,
 	# Startstunde (−1 = Originalstimmung der Karte), Minuten je 24 h
 	"day_night": "daynight", "dn_start_h": "daynightstart", "dn_cycle_min": "daynightcycle",
+	# 0.11.7 (Ergänzung): Tag-/Nachtwechsel je Spielmodus, Bitmaske über Net.Mode (Bit 0 DM, 1 TDM, 2 Besetzung,
+	# 3 Aufgaben, 4 Coop); 31 = alle (Standard, Verhalten wie 0.11.5), wirkt nur bei daynight an
+	"dn_modes": "daynightmodes",
+	# 0.11.7 (Ergänzung): MP-Minikarte links unten statt Kompass (src/ui/mp_minimap.gd), Standard aus
+	"minimap": "minimap",
 }
 ## Wertebereiche: Menü (0x629EE0) bzw. Konsole; bots = Ergänzung (KI-Soldaten je Team); 0 = „No limit“ (T2010)
 const RULE_RANGE := {
@@ -72,9 +77,17 @@ const RULE_RANGE := {
 	"bots_per_team": [0, 16], "max_ping": [0, 9999], "max_freq": [0, 100], "max_inactivity": [0, 3600],
 	"support_strike": [0, 3], "support_interval_min": [1, 60], "coop_difficulty": [1, 4], "coop_lives": [-1, 99],
 	"day_start_h": [0, 23], "day_cycle_min": [0, 240], "dn_start_h": [-1, 23], "dn_cycle_min": [1, 240],
+	"dn_modes": [0, 31],
 }
 ## 0.11.5: Tag-/Nachtwechsel standardmäßig aus; an: Start = Kartenstimmung, 60 min je Tag
-const DAYNIGHT_DEFAULTS := {"day_night": false, "dn_start_h": -1, "dn_cycle_min": 60}
+const DAYNIGHT_DEFAULTS := {"day_night": false, "dn_start_h": -1, "dn_cycle_min": 60, "dn_modes": 31}
+
+
+## 0.11.7: Tag-/Nachtwechsel für Spielmodus m erlaubt (Regel daynight an UND Bit m in daynightmodes)
+func day_night_for(m: int) -> bool:
+	return bool(rule("day_night")) and (int(rule("dn_modes")) >> clampi(m, 0, 4)) & 1 == 1
+## 0.11.7: Minikarte standardmäßig aus (dann Kompass wie bisher)
+const MINIMAP_DEFAULTS := {"minimap": false}
 ## Tageszeit-Ergänzung: Start 19 Uhr (Dämmerung), 60 min je Tag; Karten ohne Tageszyklus ignorieren beides
 const DAYTIME_DEFAULTS := {"day_start_h": 19, "day_cycle_min": 60}
 ## B-011: Unterstützung standardmäßig aus (nur wenn in den Servereinstellungen erlaubt)
@@ -141,6 +154,7 @@ static func style_defaults(m: int) -> Dictionary:
 	d.merge(SUPPORT_DEFAULTS)
 	d.merge(DAYTIME_DEFAULTS)
 	d.merge(DAYNIGHT_DEFAULTS)
+	d.merge(MINIMAP_DEFAULTS)
 	d["kill_cam"] = m == Mode.DEATHMATCH          # Kill-Cam (Ergänzung): Standard nur im Deathmatch an
 	return d
 
@@ -531,6 +545,11 @@ func third_person_allowed() -> bool:
 	return not is_online or bool(rule("third_person"))
 
 
+## 0.11.7: Minikarte (Server-Regel „minimap“) – ersetzt im MP-HUD dann den Kompass
+func minimap_enabled() -> bool:
+	return is_online and bool(rule("minimap"))
+
+
 func vehicles_allowed() -> bool:
 	return not is_online or bool(rule("allow_vehicles"))
 
@@ -725,7 +744,7 @@ func _master_report(winner: int, partial := false) -> void:
 ## {text, level, master}; level = Karrierestufe 1..15 (online) bzw. Original-Rang 0..7 (LAN).
 func shown_rank(id) -> Dictionary:
 	var p: Dictionary = players.get(id, {})
-	if bool(settings.get("internet", false)) and get_node_or_null("/root/Master") and get_node("/root/Master").is_official_build():
+	if master_mode():                  # 0.11.7: gleiche Bedingung wie Rangmeldung/Bericht (vorher eigene Abfrage)
 		var lv := int(p.get("master_rank", -1))
 		if lv < 1:
 			return {"text": "", "level": -1, "master": true}
@@ -752,7 +771,7 @@ func _on_peer_connected(id: int) -> void:
 		get_tree().create_timer(GUEST_TIMEOUT_S).timeout.connect(func():
 			if _peer and multiplayer.is_server() and not players.has(id) and multiplayer.get_peers().has(id):
 				_reject_log(id, "peer", "keine Anmeldung nach %d s -> getrennt" % int(GUEST_TIMEOUT_S))
-				_peer.disconnect_peer(id))
+				auth.drop_peer(id, 0))     # 0.11.7: einmalige Trennung über Auth (kein Doppel-disconnect)
 
 
 func _on_peer_disconnected(id: int) -> void:
@@ -766,8 +785,10 @@ func _on_peer_disconnected(id: int) -> void:
 	var ms := get_node_or_null("/root/Master")
 	if ms:
 		ms.clear_peer(id)
-	for d in [_active_ms, _ready_peers, _ping_over, _chat_times, _muted_until, _last_st_ms, ping_override, _guest_rejects]:
+	for d in [_active_ms, _ready_peers, _ping_over, _chat_times, _muted_until, _last_st_ms, ping_override, _guest_rejects,
+			_gen, _hp_sent, spawn_block_log, _corpse_poses, _respawn_ready_ms, _respawn]:   # 0.11.7: Peer-Tabellen begrenzen
 		(d as Dictionary).erase(id)
+	_admin_fail.erase("peer:%d" % id)
 	_remove_player.rpc(id)
 	_players.rpc(players)
 
@@ -800,7 +821,7 @@ func _register(pname: String, password: String, proto: String, cls: int = 2, tea
 		reason = "Server ist voll."
 	if reason != "":
 		_rejected.rpc_id(id, reason)
-		get_tree().create_timer(1.0).timeout.connect(func(): if _peer: _peer.disconnect_peer(id))
+		auth.drop_peer(id, 1000)         # 0.11.7: statt eigener Lambda mit disconnect_peer (Doppel-disconnect)
 		return
 	players[id] = _new_player(pname.substr(0, 24), _pick_team(), cls)
 	players[id]["joined_ms"] = Time.get_ticks_msec()
@@ -1467,7 +1488,7 @@ func kick(id: int, msg_victim: String, msg_all: String) -> void:
 	_announce(fmt_s(msg_all, [nm]))
 	if multiplayer.get_peers().has(id):
 		_rejected.rpc_id(id, msg_victim)
-		get_tree().create_timer(1.0).timeout.connect(func(): if _peer: _peer.disconnect_peer(id))
+		auth.drop_peer(id, 1000)         # 0.11.7: einmalig, nur solange verbunden (vorher Lambda + disconnect_peer)
 
 
 ## --- Server-Grenzen: maxping, maxinactivity, maxfreq, floodprotect (ServerLauncher „Advanced“) ---------------
@@ -1581,6 +1602,23 @@ func _rank_msg(id: int, rank: int, up: bool) -> void:
 
 
 var rank_log: Array = []      ## Tests/Anzeige: [Peer-ID, Rang, befördert]
+
+
+## 0.11.7 Parität Online/LAN: Master-Beförderung (nur Server) wie die LAN-Meldung an die übrigen Spieler im Chat
+## („<Name> wurde befördert zu <Rang>“) und in rank_log; der Betroffene bekommt Master._promoted (eigene Meldung + HUD).
+## Nutzt das vorhandene _chat-RPC (kein neues RPC, Protokoll bleibt DH2-LAN-6).
+## 0.11.7 parity online/LAN: master promotion is announced to the other players like the LAN message.
+func announce_promotion(id: int, rank_label: String) -> void:
+	if is_online and not multiplayer.is_server():
+		return
+	rank_log.append([id, -1, true, rank_label])
+	var line := "%s %s %s" % [String(players.get(id, {}).get("name", "?")), tx(8903, "wurde befördert zu"), rank_label]
+	if not dedicated and id != my_id():
+		_chat("Server", line, false)
+	if is_online:
+		for pid in multiplayer.get_peers():
+			if int(pid) != id and players.has(int(pid)):
+				_chat.rpc_id(int(pid), "Server", line, false)
 
 
 ## Konfigurationsdatei im Original-ServerLauncher-Stil (eine Konsolenzeile je Zeile) ausführen
@@ -1752,8 +1790,14 @@ func _begin_match() -> void:
 	_vip.clear()
 	_ready_peers.clear()          # Karte wird neu geladen: Grenzen erst wieder nach _client_ready prüfen
 	_ping_over.clear()
+	_corpse_poses.clear()         # 0.11.7: Leichen der alten Karte/Runde (Langlauf-Speicher)
+	_hp_sent.clear()
+	_respawn_ready_ms.clear()
+	for lg in [rank_log, balance_log, corpse_pose_log, zone_events]:
+		_trim_log(lg)
 	_warm_t = float(rule("warmup_s"))
 	game_state = State.WARMUP if _warm_t > 0.0 else State.RUNNING
+	soak_trace("begin_match start_mission")
 	Game.start_mission(String(settings["map"]))
 
 
@@ -1996,7 +2040,13 @@ func _spawn(id: int, pname: String, team: int, pos: Vector3, yaw: float, gen: in
 	if is_instance_valid(old) and old.alive:
 		old.queue_free()
 	elif is_instance_valid(old):
-		get_tree().create_timer(20.0).timeout.connect(func(): if is_instance_valid(old): old.queue_free())   # Leiche räumen
+		# Leiche räumen; 0.11.7: schwache Referenz – nach Kartenwechsel ist die Leiche schon frei (sonst Fehler
+		# „Lambda capture … was freed“ je Leiche im Langlauf) / weakref: corpse may be freed by a map change
+		var wr: WeakRef = weakref(old)
+		get_tree().create_timer(20.0).timeout.connect(func():
+			var o = wr.get_ref()
+			if o != null and is_instance_valid(o):
+				o.queue_free())
 	var allied := team != Soldier.TEAM_AXIS
 	var lo := ["sten", "colt", "no36"] if allied else ["mp40", "p08", "m24"]
 	var col := Color(0.43, 0.39, 0.25) if team == 0 else (Color(0.36, 0.38, 0.33) if team == 1 \
@@ -2600,6 +2650,15 @@ var pos_fixes := 0                 ## Client: vom Server zurückgesetzte Bewegun
 var rejects: Array = []            ## Server: verworfene RPCs [{peer, kind, why}] (Tests, Protokoll)
 
 
+## 0.11.7: Test-/Diagnoselisten im Langlauf begrenzen (älteste Einträge fallen weg)
+const LOG_MAX := 200
+
+
+static func _trim_log(a: Array, n := LOG_MAX) -> void:
+	if a.size() > n:
+		a.assign(a.slice(a.size() - n))
+
+
 func _reject_log(sid: int, kind: String, why: String) -> void:
 	print("NET-AUTH: Peer %d %s verworfen: %s" % [sid, kind, why])
 	rejects.append({"peer": sid, "kind": kind, "why": why})
@@ -3024,11 +3083,14 @@ func change_map(id := "") -> void:
 		var ml: Array = settings.get("map_list", [])
 		var i := ml.find(String(settings["map"]))
 		id = String(ml[(i + 1) % ml.size()]) if not ml.is_empty() else String(settings["map"])
+	soak_trace("change_map %s (map=%s list=%s)" % [id, settings.get("map"), str(settings.get("map_list"))])
 	_set_map(id)
 	round_no = 1
 	team_wins = [0, 0]
 	_begin_match()
+	soak_trace("change_map begun")
 	_enter_match.rpc(public_settings(), team_score)
+	soak_trace("change_map sent")
 
 
 func restart_round() -> void:
@@ -3261,6 +3323,7 @@ func _corpse_pose(pid: int, gen: int, pose: PackedFloat32Array, origin := Vector
 		Gore.apply(s, Gore.sanitize_mask(gore), Vector3.ZERO, false)
 	if not pose.is_empty() and s.model and s.model.apply_corpse_pose(pose):
 		corpse_pose_log.append(pid)
+		_trim_log(corpse_pose_log)
 	elif origin.is_finite():
 		s.pin_corpse(origin)           # ohne passendes Skelett/Ragdoll: wenigstens der Leichenort des Servers
 
@@ -3431,9 +3494,56 @@ func _process(_delta: float) -> void:
 		_wd_pump()
 		return
 	_process_browse()
+	if _mem_log_ms > 0 and Time.get_ticks_msec() >= _mem_next_ms:
+		_mem_next_ms = Time.get_ticks_msec() + _mem_log_ms
+		var ml := mem_stat_line()
+		print(ml)
+		if _mem_file:                    # unabhängig von der Konsolen-Pipe / independent of the console pipe
+			_mem_file.store_line(Time.get_datetime_string_from_system() + " " + ml)
+			_mem_file.flush()
 	if not is_online or Game.current_mission() == null:
 		return
 	_show_board(match_over or Input.is_action_pressed("soldier_next") or Input.is_action_pressed("show_players"))
+
+
+## 0.11.7 Langlauf (Soak): dedizierter Server mit `--mem_log_s=<s>` schreibt periodisch eine MEMSTAT-Zeile
+## (statischer Speicher, Objekt-/Knoten-/Waisen-/Ressourcenzahl, Peer-/Spieler-/Soldatentabellen, Karte, Runde).
+## Soak: periodic memory line for long-run checks.
+var _mem_log_ms := 0
+var _mem_next_ms := 0
+var _mem_t0_ms := 0
+var _mem_file: FileAccess          ## `--mem_log_file=<pfad>`: MEMSTAT zusätzlich in eine Datei
+
+
+## Soak-Diagnose: Ablaufmarke in die MEMSTAT-Datei (nur mit --mem_log_file)
+func soak_trace(s: String) -> void:
+	if _mem_file:
+		_mem_file.store_line("%s TRACE %s" % [Time.get_datetime_string_from_system(), s])
+		_mem_file.flush()
+
+
+func mem_stat() -> Dictionary:
+	var em = get_node_or_null("/root/Effects")
+	return {"t": (Time.get_ticks_msec() - _mem_t0_ms) / 1000,
+		"static_mb": snappedf(OS.get_static_memory_usage() / 1048576.0, 0.1),
+		"objects": int(Performance.get_monitor(Performance.OBJECT_COUNT)),
+		"nodes": int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)),
+		"orphans": int(Performance.get_monitor(Performance.OBJECT_ORPHAN_NODE_COUNT)),
+		"resources": int(Performance.get_monitor(Performance.OBJECT_RESOURCE_COUNT)),
+		"peers": multiplayer.get_peers().size() if is_online else 0, "players": players.size(),
+		"soldiers": _soldiers.size(), "gen": _gen.size(), "corpses": get_tree().get_nodes_in_group("corpses").size(),
+		"decals": (em.get("_decals") as Array).size() if em and em.get("_decals") is Array else -1,
+		"auth": auth.table_sizes() if auth else {}, "chat": chat_log.size(), "feed": kill_feed.size(),
+		"rejects": rejects.size(), "map": String(settings.get("map", "")), "round": round_no}
+
+
+func mem_stat_line() -> String:
+	var d := mem_stat()
+	var a: Dictionary = d["auth"]
+	return "MEMSTAT t=%d static_mb=%.1f objects=%d nodes=%d orphans=%d resources=%d peers=%d players=%d soldiers=%d gen=%d corpses=%d decals=%d auth_live=%d auth_pending=%d auth_drop=%d chat=%d feed=%d rejects=%d map=%s round=%d" % [
+		d["t"], d["static_mb"], d["objects"], d["nodes"], d["orphans"], d["resources"], d["peers"], d["players"],
+		d["soldiers"], d["gen"], d["corpses"], d["decals"], int(a.get("live", 0)), int(a.get("pending", 0)),
+		int(a.get("dropping", 0)), d["chat"], d["feed"], d["rejects"], d["map"], d["round"]]
 
 
 func board_text() -> String:
@@ -3568,7 +3678,8 @@ func server_info() -> Dictionary:
 			"coop_difficulty": int(rule("coop_difficulty")), "coop_lives": int(rule("coop_lives")),
 			"team_lives": bool(rule("team_lives")), "allow_crosshair": bool(rule("allow_crosshair")),
 			# 0.11.5: Tag-/Nachtwechsel
-			"day_night": bool(rule("day_night")), "dn_start_h": int(rule("dn_start_h")), "dn_cycle_min": int(rule("dn_cycle_min"))},
+			"day_night": bool(rule("day_night")), "dn_start_h": int(rule("dn_start_h")), "dn_cycle_min": int(rule("dn_cycle_min")),
+			"dn_modes": int(rule("dn_modes")), "minimap": bool(rule("minimap"))},
 		# Spiel-Info (gameinfo.4ds): Version (Filter „Selbe Version“ T2579), Team-/Spieler-Status, Runde
 		"ver": String(ProjectSettings.get_setting("application/config/version")), "ts": [int(team_score[0]), int(team_score[1])],
 		"w": team_wins, "rn": round_no, "st": game_state, "plist": _info_players()}
@@ -3960,6 +4071,13 @@ func _start_dedicated(cfg_path: String) -> void:
 		_run_watchdog(cfg_path)
 		return
 	print("HD2 console – Dangerous Hidden 2, dedizierter Server. Type 'help' for keywords list")
+	for a in uargs:
+		if a.begins_with("--mem_log_s="):          # 0.11.7 Soak: MEMSTAT-Zeile alle n Sekunden
+			_mem_log_ms = maxi(int(a.get_slice("=", 1)), 1) * 1000
+			_mem_t0_ms = Time.get_ticks_msec()
+			_mem_next_ms = _mem_t0_ms
+		elif a.begins_with("--mem_log_file="):
+			_mem_file = FileAccess.open(a.get_slice("=", 1), FileAccess.WRITE)
 	local_name = "Server"
 	_cfg_pending = {"dedicated": true}
 	if cfg_path != "":
@@ -3991,8 +4109,11 @@ func _console_line(l: String) -> void:
 	if watchdog:
 		_wd_forward(l)
 		return
+	soak_trace("console in: " + l)
 	print("> ", l)
+	soak_trace("console printed")
 	var r := server_command(l, 0)
+	soak_trace("console done: " + r.substr(0, 60))
 	if r != "":
 		print(r)
 

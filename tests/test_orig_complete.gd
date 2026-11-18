@@ -234,6 +234,15 @@ func _follow_up() -> void:
 
 ## Missionsende: sofort berichten, solange die Mission noch existiert (danach wechselt die Szene)
 func _on_mission_finished(_success: bool, _reason: String) -> void:
+	# 0.11.7 AP-49b: Nachweis, dass die Mission erst nach der Skriptkamera (Fake-Cutscene) endet
+	var rt = m.get("ls_runtime") if is_instance_valid(m) else null
+	if rt and "fake_cutscene_log" in rt:
+		var now := Time.get_ticks_msec()
+		var parts := []
+		for e in rt.fake_cutscene_log:
+			parts.append("%s@-%.1fs" % ["an" if e[0] else "aus", (now - int(e[1])) / 1000.0])
+		print("SKRIPTKAMERA|%s|Ende %s|aktiv beim Ende %s|%s" % [String(Game.cli.get("mission", "")),
+			"Sieg" if _success else "Fehlschlag", rt.fake_cutscene or rt.in_cutscene, ", ".join(parts)])
 	_report.call_deferred()
 
 

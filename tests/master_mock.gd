@@ -126,6 +126,16 @@ func _handle(s: StreamPeerTCP, req: Dictionary) -> void:
 	elif req["method"] == "GET" and p.begins_with("/v1/accounts/") and p.ends_with("/stats"):
 		_reply(s, 200, {"guid_hash": p.get_slice("/", 3), "rank": stats_rank,
 			"career": {"level": stats_rank, "name": "Test", "xp": 12345}})
+	elif p == "/v1/accounts/me/soldiers" and req["method"] == "GET":
+		if String(req["headers"].get("authorization", "")) != "Bearer " + "x".repeat(43):
+			_reply(s, 401, {"error": {"code": "BAD_SIGNATURE"}})
+			return
+		var out := []
+		for k in soldiers:
+			out.append(soldiers[k])
+		_reply(s, 200, {"soldiers": out})
+	elif p.begins_with("/v1/accounts/me/soldiers/") and req["method"] == "PUT":
+		_soldier_put(s, req, p.get_slice("/", 5))
 	elif p == "/v1/servers/register":
 		var pl = _open(req["body"], "DH2/v1/register", "pubkey_pem")
 		if pl == null:
@@ -351,6 +361,44 @@ func _login(s: StreamPeerTCP, req: Dictionary) -> void:
 	var over: bool = pre.has("rank") and int(pre["rank"]) != 5
 	_reply(s, 200, {"session": "x".repeat(43), "expires_at": int(Time.get_unix_time_from_system()) + 3600,
 		"guid_hash": gh, "name": accounts[gh]["name"], "rank": 5, "rank_source": "master", "rank_overridden": over})
+
+
+## 0.11.7 Soldatenprofil (§9.7/§15.11): Umschlag DH2/v1/soldier mit Kontoschlüssel, rev = erwarteter Stand.
+var soldiers := {}                  ## soldier_id -> {soldier_id, name, figure, side, data, rev, gh}
+var soldier_puts := 0
+
+
+func _soldier_put(s: StreamPeerTCP, req: Dictionary, sid: String) -> void:
+	var env = JSON.parse_string(req["body"].get_string_from_utf8())
+	var pre = JSON.parse_string(Marshalls.base64_to_raw(String(env.get("payload", ""))).get_string_from_utf8()) \
+		if typeof(env) == TYPE_DICTIONARY else null
+	var gh := String(pre.get("guid_hash", "")) if typeof(pre) == TYPE_DICTIONARY else ""
+	if not accounts.has(gh):
+		_reply(s, 404, {"error": {"code": "UNKNOWN_ACCOUNT"}})
+		return
+	var k := CryptoKey.new()
+	k.load_from_string(String(accounts[gh]["pub"]), true)
+	var pl = _open_with(env, "DH2/v1/soldier", k) if env.get("kid") == accounts[gh]["akid"] else null
+	if pl == null:
+		_reply(s, 401, {"error": {"code": "BAD_SIGNATURE"}})
+		return
+	var allowed := ["v", "ts", "nonce", "guid_hash", "soldier_id", "name", "figure", "side", "data", "rev"]
+	for key in pl:
+		if not key in allowed:
+			_reply(s, 400, {"error": {"code": "BAD_REQUEST", "message": "payload schema"}})
+			return
+	if String(pl.get("soldier_id", "")) != sid or not RegEx.create_from_string("^[A-Za-z0-9_-]{16}$").search(sid) \
+			or typeof(pl.get("data")) != TYPE_DICTIONARY:
+		_reply(s, 400, {"error": {"code": "INVALID_FIELD", "message": "soldier_id/data"}})
+		return
+	var cur := int(soldiers.get(sid, {}).get("rev", 0))
+	if int(pl.get("rev", -1)) != cur:
+		_reply(s, 409, {"error": {"code": "CONFLICT"}})
+		return
+	soldier_puts += 1
+	soldiers[sid] = {"soldier_id": sid, "name": pl["name"], "figure": int(pl["figure"]), "side": pl["side"],
+		"data": pl["data"], "rev": cur + 1, "gh": gh, "updated_at": int(Time.get_unix_time_from_system())}
+	_reply(s, 200, {"soldier_id": sid, "rev": cur + 1})
 
 
 func _reply(s: StreamPeerTCP, status: int, j) -> void:

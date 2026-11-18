@@ -282,6 +282,14 @@ func _run() -> void:
 	check(int(Net.players[1].get("rank", 0)) == 0 and Net.rank_log.any(func(r): return r[0] == 1 and r[1] == 0 and not r[2]),
 		"Teamkill −10 → degradiert (%s)" % Net.tx(8900, "Sie wurden degradiert zu"), str(Net.rank_log))
 	check(Net.board_text().contains("Rang"), "Punktetabelle mit Rang-Spalte")
+	# 0.11.7 Parität: Master-Beförderung (online) erscheint bei den übrigen Spielern wie die LAN-Meldung
+	Net.players[999] = {"name": "PromTest"}
+	Net.announce_promotion(999, "Feldwebel")
+	var want := "PromTest %s Feldwebel" % Net.tx(8903, "wurde befördert zu")
+	check(Net.chat_log.any(func(e): return String(e["text"]) == want) and Net.rank_log.any(func(r): return r[0] == 999 and r[2]),
+		"Online-Beförderung: Meldung an die übrigen Spieler wie im LAN", want)
+	Net.players.erase(999)
+	check(Net.shown_rank(1)["master"] == Net.master_mode(), "Rang-Anzeige folgt master_mode() (LAN = Original-Rang)")
 
 	# --- „FEUER DRÜCKEN FÜR RESPAWN“ (T7406): nach der Respawn-Zeit, Feuertaste = sofort ---
 	me = Net._soldiers[1]

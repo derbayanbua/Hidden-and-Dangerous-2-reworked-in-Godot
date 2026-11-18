@@ -955,6 +955,15 @@ func _process(delta: float) -> void:
 		_arm.position = Vector3.ZERO
 		_dist = move_toward(_dist, vd, CAM3_SPEED * delta)   # Verfolgerkamera hinter dem Fahrzeug
 		_arm.spring_length = _dist
+	elif is_instance_valid(target.mounted) and target.mounted.has_method("fixed_third_camera") \
+			and (target.mounted.fixed_third_camera() as Vector3).is_finite():
+		# 0.11.7: Bordschützenstand mit eigenem 3.-Person-Frame (AFRICA6 Ju 88 CAMERA3RDx): fester Punkt, kein Federarm
+		_restore_vehicle_hide()
+		_pivot.global_position = target.mounted.fixed_third_camera()
+		_pivot.global_rotation = Vector3(lpitch, lyaw, 0.0)
+		_arm.position = Vector3.ZERO
+		_dist = 0.0
+		_arm.spring_length = 0.0
 	else:
 		_restore_vehicle_hide()
 		# 3. Person: Drehpunkt = Dummy camera3RD, Kamera auf der Blickachse dahinter (gamecam.set Satz 1/3/4/5/6)

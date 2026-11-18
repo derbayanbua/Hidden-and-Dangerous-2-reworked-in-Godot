@@ -70,7 +70,14 @@ func _run() -> void:
 	check(m.asset_report.missing.is_empty(), "Alle Originaltexturen/Modelle vorhanden: " + str(m.asset_report.missing))
 	check(m.asset_report.models > 30 and m.asset_report.textures >= 10, "Vorhandene Modelle und Texturen wiederverwendet")
 	check(get_tree().get_nodes_in_group("bavaria_boundaries").size() == 4, "Vier physische Kartengrenzen")
-	check(float(m.asset_report.trees) / (m._bounds().size.x*m._bounds().size.y) >= 180.0/(532.0*554.0), "Mindestens bisherige Baumdichte pro Quadratmeter")
+	# Baumdichte: alle Bäume innerhalb der Grenze (Zufallswald + Bodenvegetation). Seit der Blickschneise zum Fern-
+	# Blickfang (11/2026) ist der Zufallswald im SW-Keil gelichtet; die Bodenvegetationsbäume zählen mit.
+	var field_trees := 0
+	for root in get_tree().get_nodes_in_group("bavaria_all_tree_roots"):
+		var tp: Vector3 = (root as Node3D).global_position
+		field_trees += int(Geometry2D.is_point_in_polygon(Vector2(tp.x, tp.z), PackedVector2Array(m.boundary)))
+	print("INFO Bäume in der Spielfläche: %d (Zufallswald %d)" % [field_trees, int(m.asset_report.trees)])
+	check(float(maxi(field_trees, int(m.asset_report.trees))) / (m._bounds().size.x*m._bounds().size.y) >= 180.0/(532.0*554.0), "Mindestens bisherige Baumdichte pro Quadratmeter")
 	check(int(m.asset_report.decorations) >= 24, "Gezielte historische Gruppen auf kompakter Karte vorhanden")
 	var tree_instances := 0
 	for batch in get_tree().get_nodes_in_group("bavaria_tree_batches"):

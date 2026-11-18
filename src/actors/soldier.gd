@@ -91,6 +91,7 @@ var has_aim_point := false
 var aim_rig: Node = null
 var fpv_muzzle: Node3D = null       ## Mündung der FPV-Waffe (CameraRig setzt sie in der 1. Person), sonst null
 var extra_spread := 0.0             ## Zusatzstreuung (Grad), z. B. KI-Fehler
+var aim_dir_hook: Callable          ## 0.11.7: KI-Zielfehler je Schuss (dir, Weapon) -> dir, gesetzt vom AIBrain
 var is_player_controlled := false
 
 # --- intern ---
@@ -525,6 +526,9 @@ func _physics_process(delta: float) -> void:
 		_update_stance(delta)
 		_update_weapon_timers(delta)
 		rotation.y = look_yaw
+		# 0.11.7: Schwimmen aus der Lage ableiten (gleiche Schwelle wie _update_movement) → Schwimmclip, Waffe weg
+		var wl := water_level() if vehicle == null and mounted == null else NAN
+		swimming = not is_nan(wl) and global_position.y + 1.1 < wl
 		model.update_anim(delta, stance, Vector2(net_velocity.x, net_velocity.z).length(), look_pitch, aiming, lean)
 		return
 	if vehicle != null:
@@ -1174,6 +1178,7 @@ func stance_allows_fire(data: WeaponData) -> bool:
 
 func _fire_shot(w: Weapon) -> void:
 	var origin := eye_position()
+	var scoped := false
 	if is_player_controlled and is_instance_valid(aim_rig) and aim_rig.get("target") == self and bool(aim_rig.get("fpv_active")) \
 			and vehicle == null and not is_instance_valid(mounted):
 		var cam: Camera3D = aim_rig.get("camera")
@@ -1181,6 +1186,7 @@ func _fire_shot(w: Weapon) -> void:
 			origin = cam.global_position
 			aim_point = aim_rig.crosshair_point()
 			has_aim_point = true
+			scoped = int(aim_rig.call("optic_overlay")) >= 0 and not using_binoculars   # 0.11.7: Schuss durchs Zielfernrohr
 	if is_instance_valid(mounted) and mounted.has_method("shot_origin"):
 		origin = mounted.shot_origin()
 	var veh_gun := false
@@ -1195,14 +1201,19 @@ func _fire_shot(w: Weapon) -> void:
 		if to.length() > 1.0:
 			dir = to.normalized()
 			# 0.10.1: Standard wie Original (Visierachse, Kugel fällt); Option „Präzises Zielen“ gleicht den Fall aus
-			if w.data.action != WeaponData.Action.ROCKET and Ballistics.compensation_enabled():
+			# 0.11.7 [D]: Zielfernrohr eingeschossen (Ballistics.scope_compensation_enabled, Einzelspieler Standard an)
+			if w.data.action != WeaponData.Action.ROCKET and (Ballistics.compensation_enabled() or (scoped and Ballistics.scope_compensation_enabled())):
 				dir = Ballistics.solve_direction(origin, aim_point, w.data)
 	var spread_deg := current_spread()
+	if is_instance_valid(mounted) and mounted.has_method("spread_deg"):
+		spread_deg = mounted.spread_deg(w)     # 0.11.7: Bordschützenstand (AFRICA6) ohne Hand-/Bloom-Zuschläge
 	if team == TEAM_ALLIED and _CF.active(_CF.steady):
 		spread_deg = 0.0
 	dir = _apply_spread(dir, spread_deg)
 	if is_player_controlled and not veh_gun and not is_instance_valid(mounted):
 		dir = apply_orig_recoil(dir, w)     # 0.11.2 nur Spieler-Controller (KI-Grundwert 0) [B]
+	elif aim_dir_hook.is_valid() and not veh_gun and not is_instance_valid(mounted):
+		dir = aim_dir_hook.call(dir, w)     # 0.11.7 KI-Zielfehler 0x5722B0 (AIBrain, nur Originalmissionen offline) [B]
 	if team == TEAM_ALLIED and _CF.active(_CF.keep_mag) and w.data.slot != WeaponData.Slot.GRENADE:
 		w.in_mag = mini(w.in_mag + 1, w.data.magazine_size)
 	if w.data.action == WeaponData.Action.ROCKET:
@@ -1235,6 +1246,8 @@ func _fire_shot(w: Weapon) -> void:
 		k = 0.8
 	elif stance == Stance.PRONE:
 		k = 0.55
+	if is_instance_valid(mounted) and mounted.has_method("spread_deg"):
+		k = 0.0      # 0.11.7: MG im Lager des Bordschützenstands (AFRICA6) – kein Hochziehen der Blickrichtung [E]
 	_recoil += Vector2(w.data.recoil_pitch * k, randf_range(-1.0, 1.0) * w.data.recoil_yaw * k)
 	last_shot_time = Time.get_ticks_msec() / 1000.0
 	shot_fired.emit(w)
@@ -1591,12 +1604,20 @@ func _shell_sound() -> void:
 ## 0.10.7: Grundwert beim Zielen = items.sav dw15 · 0,01 rad [B 0x545140]; im Stand, ausgeruht, ohne Kaderwert genau
 ## dieser Wert. Haltung/Bewegung/Dauerfeuer/Ausdauer, Hüftanschlag und Faktor „Schießen“ (0,7–1,5) sind Nachbau [E] –
 ## das Original nutzt in 0x5433B0 immer dw15 (kein dw14, kein Zielen-Zweig).
+## Streuungsfaktor je Haltung STAND/CROUCH/PRONE [D] (0.11.7 Vorgabe, im Original nicht vorhanden – siehe current_spread)
+const STANCE_SPREAD_K := [1.0, 0.75, 0.5]
+
+
 func current_spread() -> float:
 	var w := current_weapon()
 	if w == null:
 		return 0.0
 	var base := w.data.spread_aim if aiming else w.data.spread_hip
-	var stance_k := [1.0, 0.75, 0.5][stance] as float
+	# Haltung: Original [B] kennt keinen Haltungsfaktor – Streuung 0x545140 liest nur dw15 (b0107_re_werte §1), der
+	# Grundwert 0x542B10 (Rückstoß 0x5454D0/Fadenkreuz) nur Waffenhaltung + Gangklasse bei BEWEGUNG (geduckt +0,1, stehend
+	# +0,75; b0112_rueckstoss §1), still stehend/hockend/liegend gleich. 0.11.7 Vorgabe Auftraggeber [D]: stehend etwas
+	# ungenauer als hockend und liegend → Faktor 1,0 / 0,75 / 0,5 (gleicher Code für Spieler, KI/Bots, MP-Server-Bots).
+	var stance_k := STANCE_SPREAD_K[stance] as float
 	var move_k := clampf(current_speed() / 2.0, 0.0, 1.0) * w.data.spread_move_add
 	var fatigue := (1.0 - stamina / 100.0) * (0.6 if aiming else 0.3)
 	var skill := skill_k(skill_shooting, 1.5, 0.7)

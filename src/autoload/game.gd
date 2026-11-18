@@ -185,6 +185,11 @@ func _register_test_maps() -> void:
 		MISSIONS[id] = e
 	if not PRACTICE_MISSIONS.has("bavaria"):
 		PRACTICE_MISSIONS.append("bavaria")
+	# 0.11.7 Schießstand (eigener Entwurf [D]): Prüfkarte für Waffenabgleich, Übungseinsatz, nicht in der MP-Liste
+	MISSIONS["test_range"] = {"title": "Schießstand (Test)", "script": "res://src/missions/test_range.gd",
+		"briefing": "Schießstand mit Bahnen auf 3, 7, 10, 25, 50, 100, 200 und 300 m. Auf jeder Bahn steht ein unverwundbarer Dummy (echte Soldatenfigur mit allen Trefferzonen); Treffer werden nur protokolliert. Keine Missionsziele."}
+	if not PRACTICE_MISSIONS.has("test_range"):
+		PRACTICE_MISSIONS.append("test_range")
 
 
 

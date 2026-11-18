@@ -118,8 +118,14 @@ func _ready() -> void:
 	_print_dedicated_identity.call_deferred()
 
 
-func _process(_d: float) -> void:
+func _process(d: float) -> void:
 	_poll_pings()
+	if auto_soldier and _acc_key != null and not _soldier_busy and _soldier_sig != "":
+		_soldier_poll += d
+		if _soldier_poll >= SOLDIER_POLL_S:
+			_soldier_poll = 0.0
+			if JSON.stringify(soldier_profile()) != _soldier_sig:
+				sync_soldier()
 
 
 # ------------------------------------------------------------------ Build-Schlüssel
@@ -297,7 +303,8 @@ func error_text(code: String) -> String:
 
 
 ## Signierte Anfrage. Liefert {ok, status, json, code, text, retry_after}. code = Masterfehlercode bzw. NET_OFFLINE/NO_BUILD.
-func request(method: String, path: String, query := "", body = null, retries := RETRIES) -> Dictionary:
+func request(method: String, path: String, query := "", body = null, retries := RETRIES,
+		extra_headers := PackedStringArray()) -> Dictionary:
 	if not is_official_build():
 		return {"ok": false, "status": 0, "code": "NO_BUILD", "text": error_text("NO_BUILD")}
 	var res := {}
@@ -311,7 +318,7 @@ func request(method: String, path: String, query := "", body = null, retries := 
 			raw = b
 		elif b != null:
 			raw = JSON.stringify(sanitize(b)).to_utf8_buffer()
-		res = await _send(method, path, query, raw)
+		res = await _send(method, path, query, raw, extra_headers)
 		var st := int(res["status"])
 		var transient: bool = st == 0 or st == 429 or st >= 500
 		if not transient or attempt == retries:
@@ -322,7 +329,8 @@ func request(method: String, path: String, query := "", body = null, retries := 
 	return res
 
 
-func _send(method: String, path: String, query: String, raw: PackedByteArray) -> Dictionary:
+func _send(method: String, path: String, query: String, raw: PackedByteArray,
+		extra_headers := PackedStringArray()) -> Dictionary:
 	var hr := HTTPRequest.new()
 	hr.timeout = TIMEOUT_S
 	hr.use_threads = false
@@ -331,6 +339,7 @@ func _send(method: String, path: String, query: String, raw: PackedByteArray) ->
 	var headers := PackedStringArray(["X-DH2-Auth: " + auth_header(method, path, query, raw), "Accept: application/json"])
 	if not raw.is_empty():
 		headers.append("Content-Type: application/json")
+	headers.append_array(extra_headers)
 	var m := {"GET": HTTPClient.METHOD_GET, "POST": HTTPClient.METHOD_POST, "PUT": HTTPClient.METHOD_PUT,
 		"DELETE": HTTPClient.METHOD_DELETE}
 	var err := hr.request_raw(url, headers, int(m.get(method, HTTPClient.METHOD_GET)), raw)
@@ -646,7 +655,96 @@ func login(profile := {}) -> bool:
 	_ranks[gh] = {"rank": account["rank"], "at": now()}
 	_acc_key = key
 	_acc_akid = akid
+	_soldier_rev = -1
+	_soldier_sig = ""
+	print("MASTER: Login ok / login ok (Rang / rank %d)" % int(account["rank"]))
 	login_done.emit(true, {"guid_hash": gh, "name": account["name"], "rank": account["rank"]})
+	if auto_soldier:
+		sync_soldier.call_deferred()      # 0.11.7: Soldatenprofil hochladen / upload soldier profile
+	return true
+
+
+# ------------------------------------------------------------------ Soldatenprofil (Protokoll §9.7 / §15.11)
+# 0.11.7: Der Client lud nie ein Profil hoch (soldier_profiles leer). Ein Profil je Konto: feste soldier_id aus dem
+# guid_hash, PUT /v1/accounts/me/soldiers/{id} (Umschlag DH2/v1/soldier, kid = account_key_id) nach dem Login und bei
+# Änderung von Klasse/Figur (Abfrage alle SOLDIER_POLL_S). rev = Optimistic Locking; bei 409 Stand per GET (Bearer) holen.
+# 0.11.7: the client never uploaded a profile. One profile per account, uploaded after login and on class/figure change.
+
+const SOLDIER_POLL_S := 5.0
+var auto_soldier := true             ## Tests: false = nur explizites sync_soldier()
+var _soldier_rev := -1               ## letzter bekannter Server-Stand (-1 = unbekannt)
+var _soldier_sig := ""               ## zuletzt hochgeladener Inhalt
+var _soldier_busy := false
+var _soldier_poll := 0.0
+
+
+func soldier_id() -> String:
+	var gh := String(account.get("guid_hash", ""))
+	return b64url(sha256(("DH2-SOLDIER-v1|" + gh).to_utf8_buffer()).slice(0, 12))
+
+
+## Profilinhalt aus dem SPIELER-SETUP (Net.local_class/local_figure). figure = HumanStore-Nummer bei "mp:<n>", sonst 0.
+func soldier_profile() -> Dictionary:
+	var cls := 3
+	var fig_key := ""
+	var n := get_node_or_null("/root/Net")
+	if n:
+		cls = int(n.local_class)
+		fig_key = String(n.local_figure)
+	var fig := 0
+	if fig_key.begins_with("mp:") and fig_key.substr(3).is_valid_int():
+		fig = clampi(int(fig_key.substr(3)), 0, 10000)
+	return {"name": clean_text(String(account.get("name", ""))).strip_edges().substr(0, 24), "figure": fig,
+		"data": {"class": cls, "figure_key": fig_key.substr(0, 40)}}
+
+
+func _soldier_put(sid: String, prof: Dictionary, rev: int) -> Dictionary:
+	var p := {"guid_hash": String(account["guid_hash"]), "soldier_id": sid, "name": prof["name"],
+		"figure": prof["figure"], "side": null, "data": prof["data"], "rev": rev}
+	return await request("PUT", "/v1/accounts/me/soldiers/" + sid, "",
+		func(): return make_envelope("DH2/v1/soldier", p, _acc_key, _acc_akid))
+
+
+## Server-Stand (rev) des Profils per GET …/soldiers (Bearer-Sitzung). 0 = nicht vorhanden, -1 = Fehler.
+func _soldier_fetch_rev(sid: String) -> int:
+	var res := await request("GET", "/v1/accounts/me/soldiers", "", null, RETRIES,
+		PackedStringArray(["Authorization: Bearer " + String(account.get("session", ""))]))
+	if not res["ok"] or typeof(res["json"]) != TYPE_DICTIONARY:
+		return -1
+	for so in res["json"].get("soldiers", []):
+		if typeof(so) == TYPE_DICTIONARY and String(so.get("soldier_id", "")) == sid:
+			return int(so.get("rev", 0))
+	return 0
+
+
+## Profil hochladen, falls geändert (force = immer). true = Server-Stand aktuell.
+func sync_soldier(force := false) -> bool:
+	if _acc_key == null or String(account.get("guid_hash", "")) == "" or _soldier_busy:
+		return false
+	var prof := soldier_profile()
+	var sig := JSON.stringify(prof)
+	if not force and sig == _soldier_sig:
+		return true
+	_soldier_busy = true
+	var sid := soldier_id()
+	if _soldier_rev < 0:
+		_soldier_rev = maxi(await _soldier_fetch_rev(sid), 0)
+	var res := await _soldier_put(sid, prof, _soldier_rev)
+	if not res["ok"] and res["code"] == "CONFLICT":
+		var r := await _soldier_fetch_rev(sid)
+		if r >= 0:
+			_soldier_rev = r
+			res = await _soldier_put(sid, prof, _soldier_rev)
+	_soldier_busy = false
+	if not res["ok"]:
+		_soldier_rev = -1
+		_soldier_poll = -60.0          # nächster automatischer Versuch frühestens nach ~65 s / retry after ~65 s
+		print("MASTER: Soldatenprofil fehlgeschlagen / soldier profile failed (%s)" % String(res["code"]))
+		return false
+	var j: Dictionary = res["json"] if typeof(res["json"]) == TYPE_DICTIONARY else {}
+	_soldier_rev = int(j.get("rev", _soldier_rev + 1))
+	_soldier_sig = sig
+	print("MASTER: Soldatenprofil gespeichert / soldier profile saved (rev %d)" % _soldier_rev)
 	return true
 
 
@@ -1022,6 +1120,9 @@ func _announce_promotions(career) -> void:
 			if String(_peer_gh[pid]) != String(c.get("gh", "")) or lvl <= 0:
 				continue
 			promotions_sent.append([int(pid), lvl])
+			var net := get_node_or_null("/root/Net")
+			if net and net.has_method("announce_promotion"):
+				net.announce_promotion(int(pid), tr(CAREER.rank_name(lvl)))   # 0.11.7: übrige Spieler wie im LAN
 			var mp := multiplayer.multiplayer_peer
 			if mp != null and multiplayer.is_server() and int(pid) != multiplayer.get_unique_id() \
 					and mp.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED:

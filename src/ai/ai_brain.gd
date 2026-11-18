@@ -117,6 +117,13 @@ func _on_link_reached(details: Dictionary) -> void:
 		return
 	if not link.has_meta("ladder"):
 		return
+	if link.has_meta("ladder_chain"):
+		var entry: Vector3 = details.get("link_entry_position", soldier.global_position)
+		var going_up: bool = entry.distance_to(link.start_position) <= entry.distance_to(link.end_position)
+		var seq: Array = link.get_meta("ladder_chain") if going_up else link.get_meta("ladder_chain_down", [])
+		if not seq.is_empty():
+			_climb_chain(seq)
+			return
 	var bottom = link.get_meta("ladder")
 	var top = (link.get_meta("ladder_top") if link.has_meta("ladder_top") else null)
 	if not is_instance_valid(bottom):
@@ -127,6 +134,23 @@ func _on_link_reached(details: Dictionary) -> void:
 		use = top
 	if use.can_interact(soldier):
 		use.climb(soldier)
+
+
+## 0.11.7: Leiterabschnitte nacheinander klettern (Mission._add_ladder_links „ladder_chain“): nächster Abschnitt erst,
+## wenn der vorige fertig ist (höchstens 20 s je Abschnitt).
+func _climb_chain(seq: Array) -> void:
+	for seg in seq:
+		if not is_instance_valid(seg) or soldier == null or not soldier.alive:
+			return
+		var t := 0.0
+		while soldier.is_climbing() and t < 20.0:
+			await get_tree().physics_frame
+			if not is_instance_valid(soldier):
+				return
+			t += get_physics_process_delta_time()
+		if seg.can_interact(soldier):
+			seg.climb(soldier)
+		await get_tree().physics_frame
 
 
 # --- Bewegung ----------------------------------------------------------------
@@ -357,18 +381,44 @@ func engage(target: Soldier, delta: float) -> bool:
 	# Zusatzstreuung der KI: sinkt mit Verfolgungsdauer und Können,
 	# steigt mit Zielbewegung und Entfernung.
 	var dist := soldier.global_position.distance_to(target.global_position)
-	var err := (1.0 - accuracy_skill) * 3.0 * clampf(1.5 - _track_time * 0.5, 0.25, 1.5)
-	if target.is_moving():
-		err += 1.0
-	if target.stance == Soldier.Stance.PRONE:
-		err += 0.5
-	err += dist / 80.0
-	soldier.extra_spread = err
+	if orig_aim_enabled():
+		# 0.11.7 AP-48e: Original-Zielfehler 0x5722B0/0x572120 [B] je Schuss (OrigAiAim), keine eigene Zusatzstreuung
+		soldier.extra_spread = 0.0
+		if not soldier.aim_dir_hook.is_valid():
+			soldier.aim_dir_hook = _orig_aim_dir
+	else:
+		var err := (1.0 - accuracy_skill) * 3.0 * clampf(1.5 - _track_time * 0.5, 0.25, 1.5)
+		if target.is_moving():
+			err += 1.0
+		if target.stance == Soldier.Stance.PRONE:
+			err += 0.5
+		err += dist / 80.0
+		soldier.extra_spread = err
+		if soldier.aim_dir_hook.is_valid():
+			soldier.aim_dir_hook = Callable()
 	var can_shoot := (skip_reaction or _track_time >= reaction_time) and facing_error(aim_p) < 0.12
 	if can_shoot and check_fire_line and friend_in_fire_line(aim_p):
 		can_shoot = false
 	_handle_bursts(w, can_shoot, delta, dist)
 	return true
+
+
+## 0.11.7 AP-48e: Original-Zielfehler der KI (hd2.exe 0x5722B0/0x572120, src/ai/orig_ai_aim.gd). Basis aus;
+## EnemyBrain schaltet ihn für Originalmissionen offline ein (`--orig_aim=0` = alter Stand).
+const _OrigAiAim := preload("res://src/ai/orig_ai_aim.gd")
+var orig_aim_last := 0.0     ## letzter Fehlerwert s (m je 100 m), Test/Messung
+
+
+func orig_aim_enabled() -> bool:
+	return false
+
+
+func _orig_aim_dir(dir: Vector3, w: Weapon) -> Vector3:
+	var s: float = _OrigAiAim.deviation(_OrigAiAim.shooting_of(soldier), int(soldier.stance), _OrigAiAim.gait_class(soldier),
+		_track_time * 1000.0, _OrigAiAim.weapon_class(w))
+	s *= _OrigAiAim.difficulty_k(Net.difficulty_level())
+	orig_aim_last = s
+	return _OrigAiAim.apply(dir, s)
 
 
 ## B-036c: Schusslinienprüfung gegen eigene Leute. Original [B Daten]: Spielerereignis „FRIEND_IN_FIRE_LINE(_S)“

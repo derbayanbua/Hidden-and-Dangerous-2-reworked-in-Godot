@@ -439,8 +439,63 @@ func _border_bush(pos: Vector3, yaw: float, height: float, parent: Node3D) -> No
 	root.add_to_group("bavaria_ground_foliage")
 	return root
 
+## Blickschneise Südwest: Keil von der Turmspitze des Fern-Blickfangs (landmark.gd) zur Wiesenmitte. Darin fehlen
+## Außenwald/Gürtelbäume, das Randgebüsch bleibt nur niedrig (Grenze erkennbar). Ränder unregelmäßig (Sinusrauschen,
+## deterministisch, kein RNG). Rückgabe 1 = mitten in der Schneise, 0 = außerhalb, dazwischen weicher Rand.
+const VISTA_TAN := 0.24           ## halber Öffnungswinkel ≈ 13,5° (ab der Turmspitze; Dorf steht nah, ≈ 175 m ab Mitte)
+const VISTA_EDGE := 7.0           ## Breite des ausgedünnten Randstreifens [m]
+var vista_tower := Vector2.ZERO
+var vista_apex := Vector2.ZERO
+var vista_ready := false
+func _setup_vista() -> void:
+	vista_tower = preload("res://src/maps/bavaria/landmark.gd").tower_xz_for(m.boundary)
+	var mp: PackedVector2Array = m.polygon(m.layout["meadow"])
+	vista_apex = Vector2.ZERO
+	for q in mp:
+		vista_apex += q
+	vista_apex /= mp.size()
+	vista_ready = String(Game.cli.get("schneise", "1")) != "0"   # --schneise=0: geschlossener Gürtel (Vergleichsläufe)
+
+func vista_factor(pos: Vector2) -> float:
+	if not vista_ready:
+		return 0.0
+	var axis := vista_apex - vista_tower
+	var dir := axis.normalized()
+	var rel := pos - vista_tower
+	var along := rel.dot(dir)
+	if along <= 0.0:
+		return 0.0
+	var side := rel.cross(dir)
+	var s := 1.0 if side >= 0.0 else -1.0
+	var hw := along * VISTA_TAN + 4.5 * sin(along * 0.11 + s * 1.9) + 2.5 * sin(along * 0.37 + s * 0.6)
+	return clampf((hw - absf(side)) / VISTA_EDGE + 0.5, 0.0, 1.0)
+
+## Schmale Sichtgasse innerhalb der Spielfläche entlang der Achse Wiesenmitte → Turm (für das Auslichten der Kartenbäume):
+## 1 = auf der Achse, 0 = weiter als ≈ VISTA_LANE m seitlich; nur zwischen Wiesenmitte und Grenze.
+const VISTA_LANE := 13.0
+func vista_lane(pos: Vector2) -> float:
+	if not vista_ready:
+		return 0.0
+	var dir := (vista_tower - vista_apex).normalized()
+	var rel := pos - vista_apex
+	if rel.dot(dir) < -6.0:
+		return 0.0
+	var side := rel.cross(dir)
+	var hw := VISTA_LANE + 2.5 * sin(rel.dot(dir) * 0.21 + (1.3 if side >= 0.0 else -0.4))
+	return clampf((hw - absf(side)) / 5.0 + 0.5, 0.0, 1.0)
+
+## Deterministische „Würfel“ je Ort (ohne RNG-Zustand): 0..1
+func _vista_hash(pos: Vector2) -> float:
+	return fposmod(sin(pos.x * 12.9898 + pos.y * 78.233) * 43758.5453, 1.0)
+
+## true = Element an dieser Stelle weglassen (Rand: nur ein Teil fällt weg → natürliche, lichte Kante).
+func vista_cut(pos: Vector2) -> bool:
+	var f := vista_factor(pos)
+	return f > 0.0 and _vista_hash(pos) < f
+
 func _boundary_screen() -> void:
 	# Sichtschutz außerhalb der unveränderten festen Grenze. Keine neuen Spielflächen/Collider.
+	_setup_vista()
 	var center := Vector2.ZERO
 	for point in m.boundary:
 		center += point
@@ -462,10 +517,21 @@ func _boundary_screen() -> void:
 			var along := a.lerp(b,(float(i)+0.5)/count)
 			for row in 2:
 				var pos := along+dir*(row*1.5)+outward*(3.3+row*2.5)
-				var hedge := _border_bush(Vector3(pos.x,-0.25,pos.y),yaw,3.5+0.6*sin(i*1.9+edge),root)
+				var bush_h := 3.5+0.6*sin(i*1.9+edge)
+				var vf := vista_factor(pos)
+				if vf > 0.0:
+					# Schneise: hintere Reihe entfällt, vordere bleibt als niedriges, ungleich hohes Gebüsch.
+					if row == 1 and vista_cut(pos):
+						continue
+					bush_h = lerpf(bush_h, 1.1+0.5*_vista_hash(pos*1.7), vf)
+				var hedge := _border_bush(Vector3(pos.x,-0.25,pos.y),yaw,bush_h,root)
+				if vf > 0.0:
+					hedge.add_to_group("bavaria_vista_bush")
 				_measure_border(hedge,a,outward)
 			if i%5==2:
 				var pos := along+outward*8.0
+				if vista_cut(pos):
+					continue
 				var tree := t.prop("l_tree" if i%2==0 else "l_tree2",Vector3(pos.x,-0.25,pos.y),0,0.8) as Node3D
 				var bounds: AABB = t.mesh_bounds(tree,Transform3D.IDENTITY)
 				tree.scale *= Vector3(6.0/maxf(bounds.size.x,0.1),(9.0+i%3)/maxf(bounds.size.y,0.1),6.0/maxf(bounds.size.z,0.1))
@@ -476,6 +542,8 @@ func _boundary_screen() -> void:
 		# Einzelne Häuser hinter dem nahen Hecken-/Gebüschsaum, nicht als starre Häuserwand.
 		for fraction in [0.24,0.72]:
 			var pos := a.lerp(b,fraction)+outward*9.0
+			if vista_factor(pos) > 0.0 or vista_factor(pos+dir*8.0) > 0.0 or vista_factor(pos-dir*8.0) > 0.0:
+				continue      # Randhaus stünde in der Blickschneise
 			var house := lb.building(Vector3(pos.x,-0.25,pos.y),16,12,6,"plaster","roof",[],true,yaw)
 			house.name = "Randhaus_"+str(edge)+"_"+str(fraction)
 			house.add_to_group("bavaria_aux_houses")
@@ -490,6 +558,7 @@ func _boundary_screen() -> void:
 
 ## Zweiter, äußerer Waldgürtel hinter dem Randsaum und den Randhäusern (rein optisch, ohne Kollision/Schatten).
 var outer_ring_offsets: Array[float] = []
+var vista_removed := 0          ## in der Blickschneise weggelassene Außenbäume (Gürtel + dichter Wald)
 func _outer_forest_ring(center: Vector2) -> void:
 	var root := Node3D.new()
 	root.name = "AeussererWaldguertel"
@@ -509,6 +578,19 @@ func _outer_forest_ring(center: Vector2) -> void:
 			var f := (float(i)-1.5+0.3*sin(i*2.3+edge))/count
 			var depth := 17.0+2.5*sin(i*1.7+edge*0.9)+(3.0 if i%2==1 else 0.0)
 			var pos := a.lerp(b,f)+outward*depth
+			if vista_cut(pos):
+				# Jeder dritte Gürtelbaum rückt an den Schneisenrand (dichtere, unregelmäßige Kante), die übrigen entfallen.
+				var moved := false
+				if i % 3 == 0:
+					for k in 12:
+						for sgn in [1.0, -1.0]:
+							var alt: Vector2 = pos + dir * sgn * (3.0 + 2.5 * k) + outward * (1.5 * sin(i * 1.1 + k))
+							if not moved and vista_factor(alt) <= 0.0:
+								pos = alt
+								moved = true
+				if not moved:
+					vista_removed += 1
+					continue
 			var key: String = species[(i+edge)%species.size()]
 			var tree := t.prop(key,Vector3(pos.x,-0.25,pos.y),0,0.8) as Node3D
 			if tree == null:
@@ -535,7 +617,13 @@ var outer_dense_count := 0
 var outer_dense_far_count := 0
 const DENSE_BLOCK_LEN := 60.0    ## ≈ 2 Blöcke je Kante: Culling wirkt, Draw Calls bleiben klein
 const FAR_TIER_DEPTH := 27.5     ## m außerhalb der Grenze: Reihen 2/3 des dichten Waldes (≈ 29,5/35,5 m) → HD-Texturen
-const OUTER_VIS_END := 260.0
+## Hinter den Reihen 0–2 wird der Wald bis kurz vor den Panoramaring verlängert (hintere Stufe, HD-Texturen, gleiche
+## Blöcke → keine zusätzlichen Zeichenaufrufe); frei bleiben ein OUTER_MEADOW breiter Wiesenstreifen vor dem Ring und
+## Lichtungen um die Dorf-Anhöhe (landmark.gd) und das Werk (factory_landmark.gd).
+const OUTER_MEADOW := 28.0
+const HILL_CLEAR := 62.0
+const WORKS_CLEAR := 48.0
+const OUTER_VIS_END := 300.0
 const OUTER_VIS_MARGIN := 40.0
 func _outer_forest_dense(center: Vector2) -> void:
 	var poly := PackedVector2Array(m.boundary)
@@ -575,6 +663,9 @@ func _outer_forest_dense(center: Vector2) -> void:
 	# Ring-MultiMesh hätte die Kartenmitte als Mittelpunkt und würde nie ausgeblendet). Stufe 1 = hintere Reihen
 	# (≥ FAR_TIER_DEPTH außerhalb der Grenze) mit HD- statt 4K-Texturen.
 	var xforms := {}       # "Art|Kante|Abschnitt|Stufe" → Array[Transform3D]
+	var ring_r: float = preload("res://src/maps/bavaria/panorama_ring.gd").RADIUS
+	var hill_c: Vector2 = preload("res://src/maps/bavaria/landmark.gd").hill_center_for(m.boundary)
+	var works_c: Vector2 = preload("res://src/maps/bavaria/factory_landmark.gd").factory_center_for(m.boundary)
 	for edge in m.boundary.size():
 		var a: Vector2 = m.boundary[edge]
 		var b: Vector2 = m.boundary[(edge+1)%m.boundary.size()]
@@ -591,6 +682,9 @@ func _outer_forest_dense(center: Vector2) -> void:
 				var pos := a.lerp(b,f)+outward*depth
 				if Geometry2D.is_point_in_polygon(pos,poly) or _boundary_dist(pos)<21.0:
 					continue
+				if vista_cut(pos):
+					vista_removed += 1
+					continue
 				var key: String = species[(i*7+edge+row*3)%species.size()]
 				if not parts.has(key):
 					continue
@@ -606,6 +700,45 @@ func _outer_forest_dense(center: Vector2) -> void:
 				# Stammfuß wie ground_vegetation auf den Außenboden (−0,30 m) und 4,5 cm eingesenkt.
 				var foot_y := -0.345-float(base_lift.get(key,0.0))*h/maxf(sz.y,0.1)
 				xforms[ck].append(Transform3D(basis,Vector3(pos.x,foot_y,pos.y)))
+	# Verlängerung bis kurz vor den Panoramaring: Kreisringe um die Kartenmitte (auch die Ecken geschlossen), jeder Baum
+	# in den Block seiner nächstgelegenen Grenzkante → keine zusätzlichen Blöcke/Zeichenaufrufe.
+	var r := 60.0
+	var ring_i := 0
+	while r < ring_r-OUTER_MEADOW:
+		var step := 5.2+0.05*(r-60.0)
+		var n := int(TAU*r/step)
+		for j in n:
+			var ang := TAU*(float(j)+0.5*(ring_i%2)+0.3*sin(j*1.7+ring_i))/n
+			var pos := center+Vector2.from_angle(ang)*(r+1.8*sin(j*2.3+ring_i*0.7))
+			if Geometry2D.is_point_in_polygon(pos,poly) or _boundary_dist(pos)<FAR_TIER_DEPTH+12.0:
+				continue
+			if pos.distance_to(hill_c)<HILL_CLEAR or pos.distance_to(works_c)<WORKS_CLEAR:
+				continue
+			if absf(wrapf((pos-center).angle()-(works_c-center).angle(),-PI,PI))<0.16+0.06*sin(r*0.13):
+				continue      # lichte Gasse zum Werk (Schlote/Hallen bleiben von der Spielfläche aus sichtbar)
+			if vista_cut(pos):
+				vista_removed += 1
+				continue
+			var key: String = species[(j*5+ring_i*3)%species.size()]
+			if not parts.has(key):
+				continue
+			var e := _nearest_edge(pos)
+			var ea: Vector2 = m.boundary[e]
+			var eb: Vector2 = m.boundary[(e+1)%m.boundary.size()]
+			var f := (pos-ea).dot((eb-ea).normalized())
+			var seg := clampi(int(floor(f/DENSE_BLOCK_LEN)),-1,int(ea.distance_to(eb)/DENSE_BLOCK_LEN))
+			var ck := "%s|%d|%d|%d" % [key,e,seg,1]
+			if not xforms.has(ck):
+				xforms[ck] = []
+			var sz: Vector3 = sizes[key]
+			var h := 11.0+3.0*absf(sin(j*0.61+ring_i*1.3))
+			var w := 6.4+1.0*absf(cos(j*0.9+ring_i))
+			var basis := Basis(Vector3.UP,j*1.13+ring_i)*Basis.from_scale(Vector3(w/maxf(sz.x,0.1),h/maxf(sz.y,0.1),w/maxf(sz.z,0.1)))
+			var foot_y := -0.345-float(base_lift.get(key,0.0))*h/maxf(sz.y,0.1)
+			xforms[ck].append(Transform3D(basis,Vector3(pos.x,foot_y,pos.y)))
+			outer_extended_count += 1
+		r += step
+		ring_i += 1
 	var root := Node3D.new()
 	root.name = "AeussererWaldDicht"
 	m.dynamic_root.add_child(root)
@@ -632,9 +765,25 @@ func _outer_forest_dense(center: Vector2) -> void:
 			visual.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			_outer_visibility(visual)
 			visual.set_meta("far_tier",far_tier)
+			var part_xf: Array = []
+			for k in list.size():
+				part_xf.append((list[k] as Transform3D)*(part[1] as Transform3D))
+			keep_xforms(visual, part_xf)
 			root.add_child(visual)
 	print("BAVARIA_WALD dicht=%d (hinten HD %d, Bloecke %d) texturen=%s" % [outer_dense_count, outer_dense_far_count,
 		root.get_child_count(), str(t.tree_tex_stats)])
+
+var outer_extended_count := 0
+func _nearest_edge(pt: Vector2) -> int:
+	var best := 0
+	var bd := INF
+	for i in m.boundary.size():
+		var q := Geometry2D.get_closest_point_to_segment(pt,m.boundary[i],m.boundary[(i+1)%m.boundary.size()])
+		var d := q.distance_to(pt)
+		if d<bd:
+			bd = d
+			best = i
+	return best
 
 ## Weiches Ausblenden der Außenbäume nach Entfernung (Blockmitte). Von der Spielfläche aus (≤ ≈ 200 m) bleibt alles
 ## sichtbar; greift für erhöhte/entfernte Kameras (Zuschauer, Übersicht) und spart dort Geometrie.
@@ -642,6 +791,11 @@ func _outer_visibility(gi: GeometryInstance3D) -> void:
 	gi.visibility_range_end = OUTER_VIS_END
 	gi.visibility_range_end_margin = OUTER_VIS_MARGIN
 	gi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+
+## Headless (Dummy-Renderer) verwirft MultiMesh-Puffer: Instanzlagen für Sichtlinien-/Prüftests als Meta behalten.
+static func keep_xforms(visual: MultiMeshInstance3D, xforms: Array) -> void:
+	if DisplayServer.get_name() == "headless":
+		visual.set_meta("instance_xforms", xforms.duplicate())
 
 func _boundary_dist(pt: Vector2) -> float:
 	var d := INF
@@ -683,6 +837,7 @@ func _batch_hedges() -> void:
 		visual.multimesh = batch
 		visual.material_override = data.material
 		visual.add_to_group("bavaria_hedge_batches")
+		keep_xforms(visual, data.transforms)
 		m.static_root.add_child(visual)
 	for mesh in sources:
 		mesh.free()

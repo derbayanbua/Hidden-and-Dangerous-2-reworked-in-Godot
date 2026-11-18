@@ -418,6 +418,11 @@ func _process(_delta: float) -> void:
 	var deg := int(round(fposmod(rad_to_deg(-s.look_yaw), 360.0)))
 	var dirs := ["N", "NO", "O", "SO", "S", "SW", "W", "NW"]
 	_compass.text = "%s  %03d°" % [dirs[int(round(deg / 45.0)) % 8], deg]
+	# 0.11.7: MP-Regel „minimap“ an → Minikarte (mp_minimap.gd) statt Kompass
+	if orig_hud:
+		orig_hud.compass_hidden = Net.minimap_enabled()
+	else:
+		_compass.visible = not Net.minimap_enabled()
 	_alarm_label.visible = mission.alarm_raised
 	var it := mission.controller.interact_target
 	_prompt.text = "[%s] %s" % [InputSetup.binding_text("interact"), it.prompt] if it else ""

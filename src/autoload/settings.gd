@@ -117,6 +117,9 @@ var objective_markers := true
 ## 0.10.1 Ergänzung (Nutzerentscheidung): „Präzises Zielen“ = Kugelfall-Ausgleich (Ballistics.solve_direction);
 ## Standard aus = Original (Schuss entlang der Visierachse, Kugel fällt mit 9,8 m/s²). MP: Server-Regel „preciseaim“.
 var precise_aim := false
+## 0.11.7 [D] Zielfernrohr eingeschossen: Kugelfall-Ausgleich nur beim Schuss durch das Zielfernrohr (Einzelspieler,
+## Ballistics.scope_compensation_enabled); aus = Original (Kugel fällt unter das Absehen)
+var scope_zero := true
 ## B-016 BEWUSSTE ABWEICHUNG ([D]): Ragdoll-Physik für Gefallene (src/actors/ragdoll.gd);
 ## aus = Original-Todesanimationen (anim.sav) wie im Original
 var ragdoll := true
@@ -195,7 +198,7 @@ func load_from_config(cfg: ConfigFile) -> void:
 		_load_key(cfg, "controls", k)
 	for k in ["master_volume", "music_volume", "sfx_volume", "speech_volume"]:
 		_load_key(cfg, "audio", k)
-	for k in ["subtitles", "crosshair", "show_fps", "show_names", "hit_feedback", "hurt_feedback", "kill_cam", "objective_markers", "ragdoll", "precise_aim", "fpv_body"]:
+	for k in ["subtitles", "crosshair", "show_fps", "show_names", "hit_feedback", "hurt_feedback", "kill_cam", "objective_markers", "ragdoll", "precise_aim", "scope_zero", "fpv_body"]:
 		_load_key(cfg, "game", k)
 	for k in ["morphing", "decals", "blood", "blood_level", "grass", "dynamic_lights", "high_models"]:
 		_load_key(cfg, "graphics", k)
@@ -321,7 +324,7 @@ func save_settings() -> void:
 	_cfg.set_value("graphics", "shadows", shadows)
 	_cfg.set_value("game", "subtitles", subtitles)
 	_cfg.set_value("game", "crosshair", crosshair)
-	for k in ["show_fps", "show_names", "hit_feedback", "hurt_feedback", "kill_cam", "objective_markers", "ragdoll", "precise_aim", "fpv_body"]:
+	for k in ["show_fps", "show_names", "hit_feedback", "hurt_feedback", "kill_cam", "objective_markers", "ragdoll", "precise_aim", "scope_zero", "fpv_body"]:
 		_cfg.set_value("game", k, get(k))
 	for k in ["morphing", "decals", "blood", "blood_level", "grass", "dynamic_lights", "high_models"]:
 		_cfg.set_value("graphics", k, get(k))
@@ -550,6 +553,16 @@ func gamma_lut() -> ImageTexture:
 
 ## Wendet die Qualitätsstufe auf ein WorldEnvironment und die Sonne an.
 ## Wird von der Mission beim Laden und bei jeder Änderung aufgerufen.
+## 0.11.7: Originalkarte (Mission mit orig_mission) → SDFGI aus; `--sdfgi_orig=1` = alter Stand (Vergleich)
+func _sdfgi_darkens(env: Environment) -> bool:
+	if String(Game.cli.get("sdfgi_orig", "0")) == "1":
+		return false
+	if env.has_meta("b041_no_volfog"):
+		return true
+	var m = Game.current_mission() if Game.has_method("current_mission") else null
+	return m != null and String(m.get("orig_mission") if "orig_mission" in m else "") != ""
+
+
 func apply_to_world(env: Environment, sun: DirectionalLight3D) -> void:
 	var q := clampi(quality, 0, QUALITY_4K)
 	if env:
@@ -568,7 +581,10 @@ func apply_to_world(env: Environment, sun: DirectionalLight3D) -> void:
 			env.set_meta("q_base_fog", env.fog_density)
 		env.ssao_enabled = true
 		env.ssil_enabled = q >= 3
-		env.sdfgi_enabled = q >= 3
+		# 0.11.7: SDFGI ersetzt das Umgebungslicht; Originalkarten (Licht fast nur aus Ambient, dichter Bewuchs) wurden
+		# auf Ultra/4K dadurch 25-58 % dunkler als auf Hoch (test_output/light_quality). Dort bleibt SDFGI aus.
+		# 0.11.7: SDFGI replaces ambient light; original maps went 25-58 % darker on Ultra/4K, so it stays off there.
+		env.sdfgi_enabled = q >= 3 and not _sdfgi_darkens(env)
 		env.sdfgi_use_occlusion = q >= 4
 		env.sdfgi_cascades = 6 if q >= 4 else 4
 		env.ssr_enabled = q >= 4

@@ -10,6 +10,89 @@ func place(s: Soldier, x: float, z: float, yaw: float) -> void:
 	s.velocity = Vector3.ZERO
 
 
+func _fire_up(s: Soldier) -> void:
+	var w := s.current_weapon()
+	if w:
+		w.in_mag = w.data.magazine_size
+		s.has_aim_point = false
+		s.look_pitch = 1.3                 # in den Himmel: trifft niemanden
+		s._fire_shot(w)
+
+
+## 0.11.7: Schussmarken der SP-Karte (MapMarks wie MP-Karten): gehörter Gegnerschuss ja, Schalldämpfer nein, eigener
+## Trupp nein, außer Hörweite und ungesehen nein; Marke hält bei angehaltener Karte, verschwindet nach SHOT_TTL.
+## Trupp unverwundbar (Lebenspunkte hochgesetzt), Schüsse steil in den Himmel.
+func _shot_marks(m: Mission, tm, hale: Soldier) -> void:
+	var hp := {}
+	for s in m.squad.members:
+		hp[s] = [s.max_health, s.health]
+		s.max_health = 1.0e6
+		s.health = 1.0e6
+	var e: Soldier = null
+	for x in m.enemies:
+		if x.alive:
+			e = x
+			break
+	check(e != null, "Gegner für Schussmarken vorhanden")
+	if e == null:
+		return
+	var ep := e.global_position
+	tm.marks.shots.clear()
+	e.global_position = m.lb.ground(0, 55, 0.3)        # 25 m vom Anführer (0, 30)
+	e.equip(["kar98k"])
+	await frames(2)
+	var w := e.current_weapon()
+	check(w != null and not MapMarks.is_silenced_noise(w.data.noise_radius, w.data) and w.data.noise_radius > 26.0,
+		"Gegnerwaffe ohne Schalldämpfer, Hörweite > Abstand", String(w.data.id) if w else "-")
+	_fire_up(e)
+	await frames(1)
+	var mk: Array = tm.marks.shots.filter(func(x): return x["src"] == e)
+	check(not mk.is_empty() and (mk[0]["pos"] as Vector3).distance_to(e.global_position) < 4.0, "SP-Karte: gehörter Gegnerschuss → Marke an der Schützenlage")
+	await tap("tactical_map")
+	var t0 := float(mk[0]["t"]) if not mk.is_empty() else 0.0
+	await seconds(0.5)
+	check(tm.is_open and not mk.is_empty() and tm.marks.shots.has(mk[0]) and is_equal_approx(float(mk[0]["t"]), t0),
+		"SP-Karte offen (Pause): Marke sichtbar, Restzeit steht")
+	tm._overlay.queue_redraw()
+	await frames(2)
+	if DisplayServer.get_name() != "headless":
+		for i in 4:
+			await RenderingServer.frame_post_draw
+		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://test_output/mp_minimap"))
+		get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://test_output/mp_minimap/sp_tactical_marks.png"))
+	await tap("tactical_map")
+	await seconds(MapMarks.SHOT_TTL + 0.5)
+	check(not tm.marks.shots.has(mk[0]) if not mk.is_empty() else false, "SP-Karte: Marke nach %.1f s verschwunden" % MapMarks.SHOT_TTL)
+	# Schalldämpfer: nie
+	e.equip(["mp40_sd"])
+	await frames(2)
+	_fire_up(e)
+	await frames(1)
+	check(tm.marks.shots.is_empty(), "SP-Karte: Schalldämpferschuss des Gegners erscheint nicht")
+	# eigener Trupp: nie
+	_fire_up(hale)
+	await frames(1)
+	check(tm.marks.shots.is_empty(), "SP-Karte: Schuss des eigenen Trupps erscheint nicht")
+	# außer Hörweite und ungesehen: nein
+	e.equip(["kar98k"])
+	e.global_position = Vector3(-120, 30, -120)
+	await frames(2)
+	for s in m.squad.alive_members():                # Wissen über ihn vergessen (sonst „gesehen“)
+		var per: Perception = s.get_node("Perception")
+		per.awareness.erase(e)
+		per.visible_now.erase(e)
+	var known: bool = tm.known_enemies().has(e)
+	var far: bool = m.squad.alive_members().all(func(s): return s.global_position.distance_to(e.global_position) > e.current_weapon().data.noise_radius)
+	_fire_up(e)
+	await frames(1)
+	check(far and not known and tm.marks.shots.is_empty(), "SP-Karte: ungehörter, ungesehener Gegnerschuss erscheint nicht",
+		"fern %s bekannt %s" % [far, known])
+	e.global_position = ep
+	for s in hp:
+		s.max_health = hp[s][0]
+		s.health = hp[s][1]
+
+
 func _run() -> void:
 	for i in 600:
 		if mission() and mission().squad and mission().squad.leader():
@@ -107,6 +190,7 @@ func _run() -> void:
 	tm.selected.append(ash)
 	tm.press_button("deleteall")
 	check(not tm.plans.has(ash) and ab.order == SquadBrain.Order.HOLD, "ALLE LÖSCHEN verwirft den Plan")
+	await _shot_marks(m, tm, hale)
 
 	# --- HUD-Lücken (GAP Abschnitt 4): Zeitzünder-Liste, Waffensymbole aller Originalwaffen ---
 	var oh = get_tree().root.find_child("OrigHud", true, false)

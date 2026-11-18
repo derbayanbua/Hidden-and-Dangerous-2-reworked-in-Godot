@@ -35,11 +35,27 @@ const HEAD_ITEM_CATEGORY := 16
 
 ## Geschossschaden nach Flugstrecke (hd2.exe 0x44B3B0): bis falloff_start voller Schaden, danach linear
 ## −falloff_per_m je Meter, nicht unter 0 [B]. Eigene Waffen ohne Originalwert: unverändert.
+## 0.11.7 [D] (Schießstand, docs/status/test_range.md): Gewehrpatronen (v0 ≥ RIFLE_V0: Gewehre, Karabiner,
+## Zielfernrohrwaffen, MG, StG 44) fallen flacher ab (Abfall × RIFLE_SLOPE_K) und behalten mindestens RIFLE_FLOOR des
+## Grundschadens – Kopftreffer auf 300 m bleibt tödlich, Rumpftreffer wirkt deutlich. Pistolen/MPs (v0 < 580) wie Original.
+## SP = MP (gemeinsame Quelle für Ballistik und Server).
+const RIFLE_V0 := 580.0   ## inkl. M1A1-Karabiner (v0 594); schnellste MP (PPSch) 503
+const RIFLE_SLOPE_K := 0.5
+const RIFLE_FLOOR := 0.6
+
+
+static func is_rifle_round(data: WeaponData) -> bool:
+	return data != null and data.muzzle_velocity >= RIFLE_V0
+
+
 static func bullet_damage(data: WeaponData, dist: float) -> float:
 	if data == null:
 		return 0.0
 	if dist <= data.falloff_start or data.falloff_per_m <= 0.0:
 		return data.damage
+	if is_rifle_round(data):
+		var d := data.damage - (dist - data.falloff_start) * data.falloff_per_m * RIFLE_SLOPE_K
+		return maxf(d, data.damage * RIFLE_FLOOR)
 	return maxf(data.damage - (dist - data.falloff_start) * data.falloff_per_m, 0.0)
 
 
@@ -265,7 +281,9 @@ static func _apply_orig_spread() -> void:
 
 ## 0.11.2 Rückstoß hd2.exe 0x5454D0 [B]: Faktor nach Waffenart (Getter vtable+0x10 der Gegenstandsdefinition):
 ## 2 → 0,8; 3 → 0,3; 4 → 0,4 (mit Zielfernrohr-Block 2 = Verhalten 5, Absehen < 4 → 1,0); 5 → 0,4; 12 → 0,5; sonst 1,0.
-## Die Zuordnung der Gegenstände zu den Arten 2/3/4/5/12 ist [P] (Pistolen/MPs/Gewehre/leichte MGs/Sturmgewehre);
+## Seit 0.11.7 kommt die Art aus items.sav (orig_weapon_kind, [B]); diese Tabelle ist nur noch Rückfall ohne Cache
+## (23 Side by Side = Art 3 laut items.sav, hier bewusst alter Stand 4 für `--orig_wkind=0`).
+## Alte Zuordnung der Gegenstände zu den Arten 2/3/4/5/12 war [P] (Pistolen/MPs/Gewehre/leichte MGs/Sturmgewehre);
 ## das Zielfernrohr-Kriterium ist [B] (items.sav Block 2 dw2 = Absehen 0–3 nur bei 13/15/16/17).
 const RECOIL_KIND := {0: 2, 1: 2, 2: 2, 3: 2, 5: 2, 260: 2, 261: 2,
 	18: 3, 20: 3, 21: 3, 22: 3, 24: 3, 25: 3,
@@ -274,12 +292,37 @@ const RECOIL_KIND := {0: 2, 1: 2, 2: 2, 3: 2, 5: 2, 260: 2, 261: 2,
 const SCOPED_ITEMS := [13, 15, 16, 17]
 
 
+## 0.11.7 (B-051) [B]: Die Waffenart ist das Typfeld der Waffen-Gegenstandsdefinition (items.sav Lader 0x7DC500, Art 1 →
+## Konstruktor 0x7E04E0, vtable 0x817408; Lader 0x7E0620: Schlussblock dw0 → +0x58, dw1 → +0x5C, dw2 → +0x60, dw3 → +0x54 =
+## Munition). Getter vtable+0x10 = 0x7E0530 `mov eax,[ecx+0x5C]` = dw1, vtable+0xC = 0x7E0520 `mov eax,[ecx+0x58]` = dw0
+## (Waffenklasse der KI-Formel 0x572120). Im Export heißen die Felder irreführend „inv_size“ [w, h] = [Klasse, Art].
+## Art: 2 Pistolen, 3 MPs + Side by Side, 4 Gewehre, 5 leichte MGs (ZB 26, Bren, Typ 97, Degtjarjow), 12 MP 44/BAR,
+## 8 MG 42/Bordwaffen, 6 Werfer. Klasse: 1 MPs, 2 Pistolen, 3 Gewehre/MP 44/Side by Side, 4 MGs/BAR, 5 Werfer.
+## `--orig_wkind=0` = Stand davor (Handtabelle unten, Side by Side als Gewehr).
+static func orig_weapon_kind(item: int) -> int:
+	if String(Game.cli.get("orig_wkind", "1")) == "0":
+		return -1
+	var sz = _orig_row(item).get("inv_size", [])
+	return int(sz[1]) if sz is Array and (sz as Array).size() > 1 and sz[1] != null else -1
+
+
+## Waffenklasse (dw0, Getter vtable+0xC) [B], −1 = unbekannt
+static func orig_weapon_class(item: int) -> int:
+	if String(Game.cli.get("orig_wkind", "1")) == "0":
+		return -1
+	var sz = _orig_row(item).get("inv_size", [])
+	return int(sz[0]) if sz is Array and (sz as Array).size() > 1 and sz[0] != null else -1
+
+
 ## Waffenart für 0x5454D0 (0 = keine der gelisteten Arten → Faktor 1,0). Ohne Originalgegenstand nach Platz/Feuerart [E].
 static func recoil_kind(w: WeaponData) -> int:
 	if w == null:
 		return 0
 	var item := orig_item_of(w.id)
 	if item >= 0:
+		var k := orig_weapon_kind(item)
+		if k >= 0:
+			return k
 		return int(RECOIL_KIND.get(item, 0))
 	if w.slot == WeaponData.Slot.SIDEARM:
 		return 2
@@ -291,6 +334,10 @@ static func recoil_kind(w: WeaponData) -> int:
 ## Rückstoßfaktor der Waffenart (0x5454D0 Fallunterscheidung) [B Faktoren].
 static func recoil_kind_factor(w: WeaponData) -> float:
 	var k := recoil_kind(w)
+	# 0.11.7 (B-051) [B]: ZF-Zweig jetzt belegt (0x5454D0 Fall 4: Block 2 (+0x4C) mit +8 == 4 [Verhalten 5] und
+	# Absehen +0xC < 4 → `break` ohne Multiplikation = 1,0; sonst Durchfall zu Fall 5 = 0,4). `--recoil_scope=0` = 0,4 wie 0.11.4.
+	if k == 4 and String(Game.cli.get("recoil_scope", "1")) != "0" and SCOPED_ITEMS.has(orig_item_of(w.id)):
+		return 1.0
 	# 0.11.4: der ZF-Zweig (Faktor 1,0) ist nicht belegt (Sprung 0x5457D4 ungeprüft) und ließ Springfield/K98-ZF
 	# bis ~3° hochschlagen. Bis zur Belegung gilt für ZF-Gewehre derselbe Faktor wie für Gewehre (0,4) [E].
 	# 0.11.4: the scope branch (factor 1.0) is unverified and threw scoped rifles up to ~3°; until verified

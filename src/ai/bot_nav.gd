@@ -29,6 +29,11 @@ var side_pos := Vector3.INF      ## Ausweichpunkt (seitlich)
 var side_t := 0.0
 var _prog_pos := Vector3.INF
 var _stage := 0
+var _idle_t := 0.0              ## s ohne Laufwunsch (kurze Pausen zählen nicht als Fortschritt)
+var _osc_best := INF            ## kleinster Restweg seit der letzten Planung (Pendel-Erkennung)
+var _osc_t := 0.0
+var _osc_n := 0
+var osc_events := 0             ## Statistik: Pendeln erkannt
 
 
 # --- Netz-Hilfen (statisch) -----------------------------------------------------------------------
@@ -116,6 +121,10 @@ func plan(s: Soldier, to: Vector3, threat: Vector3, use_cover: bool) -> bool:
 	planned_on_nav = nav_ready(s)
 	waypoints = PackedVector3Array()
 	wp_i = 0
+	if not dest.is_finite() or flat(dest, to) > 3.0:
+		_osc_n = 0
+	_osc_best = INF
+	_osc_t = 0.0
 	dest = to
 	cover_points = 0
 	side_t = 0.0
@@ -142,6 +151,17 @@ func plan(s: Soldier, to: Vector3, threat: Vector3, use_cover: bool) -> bool:
 	if not is_finite(path_len) or path_len > 5000.0:
 		waypoints.append(to)
 		return reachable
+	# 0.11.7 (P2): menschlichere Laufwege – Umweg über einen Kartenwegpunkt (Zonen/Spawns/Netz) und seitlich
+	# versetzte Zwischenpunkte statt stur gerader Netzlinie; nur erreichbare Ziele, geringer Umweg.
+	# 0.11.7 (P2): more human routes – via a map waypoint plus lateral offsets instead of the straight nav line.
+	if use_cover and humanize and not threat.is_finite() and reachable and path_len > HUMAN_MIN_LEN \
+			and String(Game.cli.get("bot_human", "1")) != "0":
+		var hv := human_route(s, from, to, path_len)
+		if hv.size() >= 1:
+			waypoints.append_array(hv)
+			waypoints.append(to)
+			human_routes += 1
+			return reachable
 	if use_cover and path_len > COVER_SEG * 1.6:
 		var space := s.get_world_3d().direct_space_state
 		var acc := 0.0
@@ -164,6 +184,145 @@ func plan(s: Soldier, to: Vector3, threat: Vector3, use_cover: bool) -> bool:
 			acc += seg
 	waypoints.append(pts[pts.size() - 1] if not reachable else to)
 	return reachable
+
+
+# --- Menschlichere Laufwege (0.11.7, P2) --------------------------------------------------------------
+# Je Karte ein Wegpunktsatz aus Zonenmitten, Spawnplätzen, Aufgabenorten und Zufallspunkten des Navmesh
+# (einmal je Netzstand erzeugt). Eine Route nimmt mit Wahrscheinlichkeit HUMAN_P einen Wegpunkt im Korridor
+# zwischen Start und Ziel (Umweg ≤ 35 % + 8 m, beide Teilwege erreichbar) und versetzt die Teilstrecken alle
+# ~16 m seitlich um 0,8–2,5 m (Netzpunkt, Sichtlinie frei). Werte [D].
+# Per map one waypoint set (zone centres, spawn slots, objectives, random navmesh points); routes take a
+# corridor waypoint with probability HUMAN_P and lateral offsets every ~16 m. Values [D].
+
+const HUMAN_P := 0.5             ## Anteil der Routen über einen Kartenwegpunkt
+const HUMAN_MIN_LEN := 25.0      ## erst ab dieser Netzweglänge
+const HUMAN_DETOUR := 1.35       ## Umweg höchstens Faktor + 8 m
+const JITTER_SEG := 16.0
+const RANDOM_WPS := 48
+
+static var humanize := true      ## --bot_human=0 schaltet ab (Vergleichsmessung)
+static var _wp_cache := {}       ## "<map-RID>:<iteration>" → PackedVector3Array
+var human_routes := 0            ## Statistik: Routen mit Kartenwegpunkt/Versatz
+var human_vias := PackedVector3Array()   ## gewählte Kartenwegpunkte (Test: Streuung je Bot)
+
+
+## Wegpunktsatz der aktuellen Karte (Zonen, Spawns, Aufgaben, Netz-Zufallspunkte)
+static func map_waypoints(n: Node3D) -> PackedVector3Array:
+	if not nav_ready(n):
+		return PackedVector3Array()
+	var m := map_of(n)
+	var key := "%d:%d" % [m.get_id(), NavigationServer3D.map_get_iteration_id(m)]
+	if _wp_cache.has(key):
+		return _wp_cache[key]
+	var raw: Array = []
+	var mi = Game.current_mission()
+	if mi != null and mi.has_method("mp_zones"):
+		for z in mi.mp_zones():
+			if z.has("xf"):
+				raw.append((z["xf"] as Transform3D).origin)
+			for sl in z.get("slots", []):
+				raw.append(sl["pos"])
+	if mi != null and mi.has_method("mp_objectives"):
+		for o in mi.mp_objectives():
+			if o is Dictionary and o.get("pos") is Vector3:
+				raw.append(o["pos"])
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(key)
+	seed(rng.randi())
+	for k in RANDOM_WPS:
+		raw.append(NavigationServer3D.map_get_random_point(m, 1, true))
+	randomize()
+	var out := PackedVector3Array()
+	for p in raw:
+		var c := closest(n, p)
+		if not c.is_finite() or (c == Vector3.ZERO and (p as Vector3).length() > 3.0):
+			continue
+		var dup := false
+		for q in out:
+			if flat(q, c) < 6.0:
+				dup = true
+				break
+		if not dup:
+			out.append(c)
+	if _wp_cache.size() > 8:
+		_wp_cache.clear()
+	_wp_cache[key] = out
+	return out
+
+
+## Wegpunkte einer „menschlichen“ Route (ohne Endziel); leer = gerader Netzweg bleibt
+func human_route(s: Soldier, from: Vector3, to: Vector3, direct: float) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	var via := Vector3.INF
+	if randf() < HUMAN_P:
+		var cands: Array = []
+		for w in map_waypoints(s):
+			if flat(w, from) < 8.0 or flat(w, to) < 8.0:
+				continue
+			var est := flat(from, w) + flat(w, to)
+			if est <= direct * HUMAN_DETOUR + 8.0:
+				cands.append(w)
+		cands.shuffle()
+		for w in cands.slice(0, 3):
+			var c1 := path_cost(s, from, w)
+			if not is_finite(c1):
+				continue
+			var c2 := path_cost(s, w, to)
+			if is_finite(c2) and c1 + c2 <= direct * HUMAN_DETOUR + 8.0:
+				via = w
+				break
+	var legs: Array = [[from, via], [via, to]] if via.is_finite() else [[from, to]]
+	var space := s.get_world_3d().direct_space_state
+	for leg in legs:
+		var pts := path(s, leg[0], leg[1])
+		if pts.size() >= 2:
+			out.append_array(_jitter(s, space, pts))
+		if leg[1] != to:
+			out.append(leg[1])
+	if via.is_finite():
+		human_vias.append(via)
+		if human_vias.size() > 16:
+			human_vias.remove_at(0)
+	return out
+
+
+## Seitlich versetzte Zwischenpunkte entlang eines Netzpfads (Sichtlinie zum Pfadpunkt frei, gleiche Ebene)
+func _jitter(s: Soldier, space: PhysicsDirectSpaceState3D, pts: PackedVector3Array) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	var total := length(pts)
+	if total < JITTER_SEG * 1.5:
+		return out
+	var side := 1.0 if randf() < 0.5 else -1.0
+	var acc := 0.0
+	var next_at := JITTER_SEG * randf_range(0.6, 1.1)
+	for i in range(1, pts.size()):
+		var a := pts[i - 1]
+		var b := pts[i]
+		var seg := a.distance_to(b)
+		var guard := 0
+		while acc + seg >= next_at and next_at < total - 8.0 and guard < 64:
+			guard += 1
+			var p := a.lerp(b, (next_at - acc) / maxf(seg, 0.001))
+			var d := b - a
+			d.y = 0.0
+			if d.length() > 0.05:
+				var perp := Vector3(-d.z, 0, d.x).normalized() * side * randf_range(0.8, 2.5)
+				var c := closest(s, p + perp)
+				# 0.11.7: Versatzpunkt muss über das Netz direkt erreichbar sein (sonst Umweg/andere Insel → Pendeln,
+				# mp_burma1_obj: Führer kam nicht vom Spawn weg)
+				if absf(c.y - p.y) < 1.0 and flat(c, p) > 0.6 and path_cost(s, p, c) <= flat(c, p) * 1.5 + 1.0:
+					var q := PhysicsRayQueryParameters3D.create(p + Vector3.UP * 0.9, c + Vector3.UP * 0.9, 1)
+					if space.intersect_ray(q).is_empty():
+						out.append(c)
+					else:
+						out.append(p)
+				else:
+					out.append(p)
+			if randf() < 0.45:
+				side = -side          # Wechsel der Seite: leichtes Schlängeln statt Linie
+			next_at += JITTER_SEG * randf_range(0.8, 1.25)
+		acc += seg
+	return out
 
 
 ## Deckung in der Nähe eines Wegpunkts: besser gedeckt als der Wegpunkt selbst, auf derselben Seite von Wänden
@@ -226,7 +385,46 @@ func track(s: Soldier, delta: float, wants_move: bool) -> int:
 	var p := s.global_position
 	if side_t > 0.0:
 		side_t -= delta
-	if not _prog_pos.is_finite() or p.distance_to(_prog_pos) > PROGRESS_DIST or not wants_move:
+	# 0.11.7: kurze Unterbrechungen (Kletterversuch der Stufe 1, Formation wartet) setzen die Abhilfe-Stufe nicht
+	# mehr zurück – sonst Schleife „2 s fest → klettern → zurückfallen → Stufe 0“ ohne Aufgeben/Notversatz
+	# (mp_czech2_obj: Bot 31–34 s am selben Fleck, prog_t nie über 13 s). Erst > 1,5 s ohne Laufwunsch = neu.
+	# 0.11.7: short interruptions (stage-1 climb attempt, formation wait) no longer reset the remedy stage.
+	if s.has_method("is_climbing") and s.is_climbing():
+		return 0                 # Kletterbewegung: weder Fortschritt noch Pause (Ergebnis zählt danach)
+	if not wants_move:
+		_idle_t += delta
+		if _idle_t > 1.5:
+			_prog_pos = p
+			prog_t = 0.0
+			_stage = 0
+		return 0
+	_idle_t = 0.0
+	# 0.11.7: Pendeln erkennen – der Bot bewegt sich (Ankerprüfung unten greift nicht), kommt dem Ziel über die Route aber
+	# nicht näher (mp_arctic3_obj: Führer pendelt 150 s unter dem Wachturm zwischen zwei Inselbrücken). Nach 12 s ohne
+	# 1,5 m Restweg-Gewinn neu planen (andere Kartenwegpunkte/Versatz), nach weiteren 12 s Ziel aufgeben.
+	# 0.11.7: oscillation detection – moving but not closing in on the goal along the route.
+	if dest.is_finite() and not waypoints.is_empty() and String(Game.cli.get("bot_osc", "1")) != "0":
+		var rem := remaining(s)
+		if rem < _osc_best - 1.5:
+			_osc_best = rem
+			_osc_t = 0.0
+		else:
+			# Klettern zählt oben nicht mit (Rückkehr vor dieser Stelle); Ausweichschritte der Festhäng-Abhilfe setzen den
+			# Anker zurück – deshalb hier unabhängig von der Geschwindigkeit (mp_czech4: Führer an einer Inselbrücke vor
+			# seinem Spawn, Ausweichen ↔ Rückkehr, Notversatz wurde nie erreicht)
+			_osc_t += delta
+			if _osc_t > 15.0:
+				_osc_t = 0.0
+				_osc_n += 1
+				osc_events += 1
+				# kein Aufgeben (Zielwechsel ließ mp_arctic1_obj immer wieder dasselbe Ziel wählen): abwechselnd neu planen
+				# und Notversatz
+				# zweites Pendeln: Notversatz Richtung Weg (mp_arctic1_obj: Inselbrücken zwischen den Wachturmbeinen sind
+				# im Netz verbunden, die Kapsel kommt aber nicht durch)
+				return 5 if _osc_n % 2 == 0 else 3
+	# Fortschritt waagerecht (0.11.7): ein Kletter-/Leiterversuch, der hoch- und wieder zurückfällt, zählte als
+	# Fortschritt (> 1,5 m senkrecht) → mp_arctic1_obj/arctic3_obj Führer 150 s an derselben Stelle ohne Abhilfe
+	if not _prog_pos.is_finite() or flat(p, _prog_pos) > PROGRESS_DIST:
 		_prog_pos = p
 		prog_t = 0.0
 		_stage = 0
@@ -246,6 +444,12 @@ func track(s: Soldier, delta: float, wants_move: bool) -> int:
 		act = 4
 	elif _stage == 5 and prog_t > 15.5:
 		act = 5
+	elif _stage >= 6 and prog_t > 18.0:
+		# 0.11.7: Abhilfen erschöpft → von vorn (vorher blieb der Bot nach dem Notversatz dauerhaft stehen)
+		_stage = 0
+		prog_t = 0.0
+		_prog_pos = p
+		return 0
 	if act != 0:
 		_stage += 1
 		stuck_events += 1
@@ -334,6 +538,9 @@ static func flank_via(s: Soldier, from: Vector3, to: Vector3, threat: Vector3) -
 ## eingeklemmt) → auf den nächsten Netzpunkt setzen; auf dem Netz → 1 m Richtung Weg versetzen, falls dort frei.
 ## Bewusste Notlösung (wie Unstuck-Hilfen anderer Spiele), nur KI-Soldaten.
 func nudge(s: Soldier, toward: Vector3) -> bool:
+	# 0.11.7: vom Versatzpunkt muss das Ziel weiter erreichbar sein (mp_burma1_obj: Versatz in eine Senke 2 m tiefer,
+	# danach Aufgabe unerreichbar und abgelöst) – geprüft in _nudge_ok
+	_nudge_goal = dest if dest.is_finite() else toward
 	var p := s.global_position
 	var c := closest(s, p)
 	var target := Vector3.INF
@@ -342,13 +549,77 @@ func nudge(s: Soldier, toward: Vector3) -> bool:
 	else:
 		var pts: PackedVector3Array = path(s, p, toward if toward.is_finite() else p)
 		if pts.size() >= 2:
-			var d := pts[1] - p
-			d.y = 0.0
-			target = closest(s, p + d.normalized() * minf(1.2, d.length()))
-	if not target.is_finite() or not s.has_method("_fits") or not s._fits(target + Vector3.UP * 0.05):
+			# 0.11.7: Punkt ~1,6 m entlang des Pfads (auch über eine kurze Inselbrücke hinweg), nicht nur Richtung pts[1]
+			var want := 1.6
+			var q := p
+			for k in range(1, pts.size()):
+				var seg := q.distance_to(pts[k])
+				if seg >= want:
+					q = q.lerp(pts[k], want / maxf(seg, 0.001))
+					want = 0.0
+					break
+				want -= seg
+				q = pts[k]
+			target = closest(s, q)
+	if not s.has_method("_fits"):
 		return false
+	# 0.11.7: Versatz nur in der Nähe und nur auf echten Boden. Der nächste Netzpunkt kann weit weg liegen (anderes
+	# Stockwerk, Netz ohne Kollision, Testgelände über der Karte: test_bots Mauerraster – Führer landete 400 m tiefer).
+	# 0.11.7: nudge only nearby and onto a real floor (nearest nav point may be far below/above).
+	if target.is_finite() and not _nudge_ok(s, p, target):
+		target = Vector3.INF
+	if not target.is_finite() or not s._fits(target + Vector3.UP * 0.05):
+		# 0.11.7: erster Versatz passt nicht (Kapsel klemmt, mp_czech2_obj > 120 s fest) → Netzpunkte im Ring 1,5/3 m
+		target = Vector3.INF
+		for r: float in [1.5, 3.0]:
+			for k in 8:
+				var a := TAU * float(k) / 8.0
+				var c2 := closest(s, p + Vector3(cos(a), 0, sin(a)) * r)
+				if flat(c2, p) > 0.8 and absf(c2.y - p.y) < 2.0 and _nudge_ok(s, p, c2) and s._fits(c2 + Vector3.UP * 0.05):
+					target = c2
+					break
+			if target.is_finite():
+				break
+	if Game.cli.has("bot_nudge_debug"):
+		print("NUDGE %s bei %s → %s" % [s.soldier_name, str(p.snapped(Vector3.ONE * 0.1)), str(target.snapped(Vector3.ONE * 0.1)) if target.is_finite() else "abgelehnt"])
+	if not target.is_finite():
+		return false
+	var fl := _floor_at(s, target)
+	if s._fits(fl + Vector3.UP * 0.05):
+		target = fl
 	s.global_position = target + Vector3.UP * 0.05
 	s.velocity = Vector3.ZERO
 	nudges += 1
 	_prog_pos = Vector3.INF
 	return true
+
+
+const NUDGE_MAX_FLAT := 4.0      ## Notversatz höchstens so weit waagerecht [D]
+const NUDGE_MAX_UP := 2.5        ## und senkrecht (ein Stockwerk/Kletterstelle) [D]
+
+
+## Notversatz zulässig: nah, und unter dem Zielpunkt liegt Weltkollision (kein Netz ohne Boden, kein Fall ins Leere)
+func _nudge_ok(s: Soldier, from: Vector3, to: Vector3) -> bool:
+	if flat(from, to) > NUDGE_MAX_FLAT or absf(to.y - from.y) > NUDGE_MAX_UP:
+		return false
+	if not _floor_hit(s, to).is_finite():
+		return false
+	if _nudge_goal.is_finite() and is_finite(path_cost(s, from, _nudge_goal)) and not is_finite(path_cost(s, to, _nudge_goal)):
+		return false             # vorher erreichbar, danach nicht mehr → kein Versatz
+	return true
+
+
+var _nudge_goal := Vector3.INF
+
+
+## Boden unter einem Netzpunkt (Strahl 1,2 m darüber bis 1,0 m darunter, nur Welt); INF = kein Boden
+func _floor_hit(s: Soldier, p: Vector3) -> Vector3:
+	var q := PhysicsRayQueryParameters3D.create(p + Vector3.UP * 1.2, p + Vector3.DOWN * 1.0, 1, [s.get_rid()])
+	var hit := s.get_world_3d().direct_space_state.intersect_ray(q)
+	return hit["position"] if not hit.is_empty() else Vector3.INF
+
+
+## Netzpunkt auf die echte Bodenhöhe setzen (Detailnetz kann bis ~1 m neben der Kollision liegen)
+func _floor_at(s: Soldier, p: Vector3) -> Vector3:
+	var h := _floor_hit(s, p)
+	return h if h.is_finite() else p

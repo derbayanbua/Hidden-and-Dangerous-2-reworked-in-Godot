@@ -19,6 +19,10 @@ const StreetLamps := preload("res://src/maps/bavaria/street_lamps.gd")
 const DayNight := preload("res://src/maps/bavaria/day_night.gd")
 const Tunnels := preload("res://src/maps/bavaria/tunnels.gd")
 const SearchlightTower := preload("res://src/maps/bavaria/searchlight_tower.gd")
+const BunkerExtras := preload("res://src/maps/bavaria/bunker_extras.gd")
+const Landmark := preload("res://src/maps/bavaria/landmark.gd")
+const FactoryLandmark := preload("res://src/maps/bavaria/factory_landmark.gd")
+const PanoramaRing := preload("res://src/maps/bavaria/panorama_ring.gd")
 const REF_ORIGIN := Vector2(650, 720)
 const X_AXIS := Vector2(0.576, 0.817)
 const Z_AXIS := Vector2(-0.817, 0.576)
@@ -33,6 +37,9 @@ var _rng := RandomNumberGenerator.new()
 var _placed: Array[Dictionary] = []
 var _zones: Array = []
 var scene_details: RefCounted
+var landmark: Node3D          ## Fern-Blickfang außerhalb der Karte (src/maps/bavaria/landmark.gd)
+var panorama_ring: MeshInstance3D  ## umlaufende Fernkulisse als Ring (src/maps/bavaria/panorama_ring.gd)
+var factory_landmark: Node3D  ## zweiter Fern-Blickfang: Werk im Nordosten (src/maps/bavaria/factory_landmark.gd)
 var war_decoration: RefCounted
 var field_emplacement: RefCounted
 var meadow_cover: RefCounted
@@ -43,6 +50,7 @@ var room_lighting: Node3D
 var street_lamps: RefCounted          ## Wegbeleuchtung (street_lamps.gd)
 var tunnels: RefCounted               ## Stollensystem (tunnels.gd)
 var searchlight_tower: Node3D         ## Suchturm auf der Wiese (searchlight_tower.gd, Knoten „Suchturm“)
+var bunker_extras: Node3D             ## Zahlenschloss, Geheimraum, Turmschalter, Sicherung, Flackern (bunker_extras.gd)
 # Tageszyklus: geerbtes Mission.day_night = src/maps/bavaria/day_night.gd (Knoten „Tageszeit“; der allgemeine
 # src/world/day_night.gd gilt nur für seine eigene Kartenliste und bleibt hier null)
 var og_glass_material: Material       ## warmer Schein der geschlossenen OG-Fenster (Tageszyklus)
@@ -88,7 +96,7 @@ func _build_world() -> void:
 	# Rein optische Fortsetzung außerhalb der Spielgrenze, ohne Boden-/Navmesh-Kollision.
 	var extras := String(Game.cli.get("stollen", "1")) != "0"   # --stollen=0: ohne Stollen/Suchturm (Vergleichsläufe)
 	var tunnel_holes: Array = Tunnels.hole_polygons(self) if extras else []   # Treppenlöcher der Stollen
-	_ground(PackedVector2Array([Vector2(-1400,-1400),Vector2(1400,-1400),Vector2(1400,1400),Vector2(-1400,1400)]),
+	_ground(PackedVector2Array([Vector2(-420,-420),Vector2(420,-420),Vector2(420,420),Vector2(-420,420)]),   # bis knapp hinter den Panoramaring
 		"meadow", -0.3, false, "DistantCountryside", {}, [_house16_cellar_hole()] + FieldTrenches.hole_polygons() + tunnel_holes)
 	# Spielboden mit Aussparung für den Kellerhals von Haus 16 (begehbarer Keller nach Plan).
 	# + abgesenkte Schützengräben auf dem Feld (FieldTrenches) + Stolleneinstiege (Tunnels).
@@ -121,6 +129,9 @@ func _build_world() -> void:
 		searchlight_tower = SearchlightTower.new()
 		searchlight_tower.build(self)
 		add_child(searchlight_tower)      # feste Knotenlage „Suchturm“: Knoten-RPCs zwischen Server und Clients
+		bunker_extras = BunkerExtras.new()
+		bunker_extras.setup(self)
+		add_child(bunker_extras)          # feste Knotenlage „StollenTechnik“
 	_build_gardens()
 	_build_woodland()
 	_templates.ground_vegetation(self)
@@ -128,6 +139,7 @@ func _build_world() -> void:
 		# Stollengrube erst hier als Grundriss: Bäume darin entfernen, ohne die Zufallsverteilung davor zu verschieben
 		building_footprints.append_array(Tunnels.footprints(self))
 	_cull_trees_at_buildings()
+	_thin_vista_trees()
 	_batch_tree_visuals()
 	_build_details()
 	SceneMatch.clear_sightlines(self)
@@ -149,6 +161,19 @@ func _build_world() -> void:
 	add_child(day_night)
 	if env:
 		day_night.bind(env, sun)
+	if String(Game.cli.get("blickfang", "1")) != "0":   # Fern-Blickfang (Dorf auf der Anhöhe); --blickfang=0 für Vergleichsläufe
+		landmark = Landmark.new()
+		landmark.build(self)
+		add_child(landmark)
+	if String(Game.cli.get("werk", "1")) != "0":        # zweiter Fern-Blickfang (Werk im Nordosten); --werk=0 für Vergleichsläufe
+		factory_landmark = FactoryLandmark.new()
+		factory_landmark.build(self)
+		add_child(factory_landmark)
+	if env and String(Game.cli.get("pano_ring", "1")) != "0":   # Fernkulisse als Ring-Geometrie; --pano_ring=0 = Himmelsstreifen
+		var ring := PanoramaRing.new()
+		if ring.build(self, env):
+			panorama_ring = ring
+			add_child(ring)
 	asset_report = {"textures": _templates.reused_textures, "models": _templates.reused_models,
 		"missing": _templates.missing.duplicate(), "trees":get_tree().get_nodes_in_group("bavaria_trees").size(),
 		"decorations":get_tree().get_nodes_in_group("bavaria_decorations").size()}
@@ -299,7 +324,7 @@ func _build_reference_part(spec: Dictionary, auxiliary := false) -> void:
 	for extension in spec.get("extensions",[]):
 		_build_reference_part(extension,true)
 
-func _free(p: Vector3, margin := 5.0) -> bool:
+func _free(p: Vector3, margin := 5.0, placed_factor := 1.0) -> bool:
 	if not inside_map(p):
 		return false
 	var q := Vector2(p.x, p.z)
@@ -332,7 +357,7 @@ func _free(p: Vector3, margin := 5.0) -> bool:
 			if Geometry2D.get_closest_point_to_segment(q, Vector2(a.x,a.z), Vector2(b.x,b.z)).distance_to(q) < float(road["width"]) * 0.5 + margin:
 				return false
 	for item in _placed:
-		if p.distance_to(item.pos) < float(item.radius) + margin:
+		if p.distance_to(item.pos) < (float(item.radius) + margin) * placed_factor:
 			return false
 	return true
 
@@ -441,6 +466,100 @@ func _cull_trees_at_buildings() -> void:
 					shape.get_parent().free()
 			root.free()
 
+## Blickschneise zum Fern-Blickfang (scene_details.vista_factor): Zufallsbäume der Karte im Keil werden nachträglich
+## ausgedünnt (Filter nach dem Platzieren → das deterministische Zufallsmuster aller übrigen Bäume bleibt unverändert).
+## Gezielt gesetzte Laubgruppen (foliage_index) bleiben. Innen nur teilweise (VISTA_INNER_CUT): lichter Hain statt Kahlschlag.
+const VISTA_INNER_CUT := 0.8
+const VISTA_INNER_DEPTH := 36.0    ## nur Bäume bis so weit innerhalb der Grenze
+var vista_trees_removed := 0
+var vista_trees_moved := 0
+func _thin_vista_trees() -> void:
+	if scene_details == null:
+		return
+	var wood: Array = []      # große Zufallswaldbäume: [Anteil, Wurzel, Fußpunkt] → zuletzt, nach Nähe zur Achse
+	for root in get_tree().get_nodes_in_group("bavaria_all_tree_roots"):
+		if not is_instance_valid(root) or root.has_meta("foliage_index") or root.is_in_group("bavaria_hedges"):
+			continue      # gezielte Laubgruppen und Hecken (Deckung, bereits gebündelt) bleiben
+		var foot: Vector3 = root.get_meta("ground_contact_point", root.global_position)
+		var q := Vector2(foot.x, foot.z)
+		# Randstreifen (bis VISTA_INNER_DEPTH innen) im Keil lichten; tiefer im Feld nur eine schmale Gasse auf der
+		# Achse Wiesenmitte → Turm (übrige Bäume bleiben als Deckung).
+		var edge_f: float = scene_details.vista_factor(q) if scene_details._boundary_dist(q) <= VISTA_INNER_DEPTH else 0.0
+		var f: float = maxf(edge_f * VISTA_INNER_CUT, scene_details.vista_lane(q))
+		if f <= 0.0 or scene_details._vista_hash(q) >= f:
+			continue
+		if root.is_in_group("bavaria_trees"):
+			wood.append([f, root, q])
+			continue
+		_drop_tree(root)
+	# Große Waldbäume: wenn möglich seitlich versetzen (Baumbestand bleibt), sonst entfernen; achsnächste zuerst.
+	wood.sort_custom(func(a, b): return a[0] > b[0])
+	for w in wood:
+		if _move_out_of_vista(w[1] as Node3D, w[2]):
+			vista_trees_moved += 1
+		else:
+			_drop_tree(w[1])
+	print("BAVARIA_SCHNEISE Kartenbäume entfernt=%d, versetzt=%d (Wald %d), Außenbäume entfernt=%d" % [vista_trees_removed,
+		vista_trees_moved, get_tree().get_nodes_in_group("bavaria_trees").size(), scene_details.vista_removed])
+
+func _drop_tree(root: Node) -> void:
+	if root.has_meta("trunk_collision"):
+		var shape := get_node_or_null(NodePath(root.get_meta("trunk_collision")))
+		if shape:
+			shape.get_parent().free()
+	root.free()
+	vista_trees_removed += 1
+
+## Großen Waldbaum seitlich aus Schneise/Gasse versetzen (Baumdichte bleibt). Ziel: innerhalb der Grenze (≥ 3 m),
+## ≥ 3 m von Grundrissen, nicht auf Wegen/Starts (_free mit eigenem Platz ausgenommen). false = kein Platz gefunden.
+func _move_out_of_vista(root: Node3D, q: Vector2) -> bool:
+	var dir: Vector2 = (scene_details.vista_tower - scene_details.vista_apex).normalized()
+	var side := 1.0 if (q - scene_details.vista_apex).cross(dir) >= 0.0 else -1.0
+	var perp := Vector2(-dir.y, dir.x) * -side      # weg von der Achse
+	if (q + perp - scene_details.vista_apex).cross(dir) * side < (q - scene_details.vista_apex).cross(dir) * side:
+		perp = -perp
+	var own := -1
+	for i in _placed.size():
+		if _placed[i].pos.distance_to(root.global_position) < 0.05:
+			own = i
+	var own_entry = _placed[own] if own >= 0 else null
+	if own >= 0:
+		_placed.remove_at(own)
+	var cands: Array[Vector2] = []
+	for step in [5.0, 8.0, 11.0, 14.0, 18.0, 22.0, 27.0]:
+		for along in [0.0, -5.0, 5.0, -10.0, 10.0]:
+			cands.append(q + perp * step + dir * along)
+	for radius in [12.0, 18.0, 25.0, 33.0, 42.0]:       # notfalls ringsum (deterministisch, ohne RNG)
+		for k in 16:
+			cands.append(q + Vector2.from_angle(k * TAU / 16.0) * radius)
+	for nq in cands:
+		if scene_details.vista_factor(nq) > 0.0 or scene_details.vista_lane(nq) > 0.0:
+			continue
+		if not Geometry2D.is_point_in_polygon(nq, boundary) or scene_details._boundary_dist(nq) < 3.0:
+			continue
+		var bad := false
+		for fp in building_footprints:
+			if Geometry2D.is_point_in_polygon(nq, fp):
+				bad = true
+			for i in fp.size():
+				bad = bad or Geometry2D.get_closest_point_to_segment(nq, fp[i], fp[(i + 1) % fp.size()]).distance_to(nq) < 3.0
+		var np := Vector3(nq.x, root.global_position.y, nq.y)
+		if bad or not _free(np, 1.5, 0.6):      # Waldbäume dürfen enger an Nachbarn rücken (Wald), Wege/Starts/Zonen frei
+			continue
+		var delta := np - Vector3(q.x, root.global_position.y, q.y)
+		root.global_position += delta
+		if root.has_meta("ground_contact_point"):
+			root.set_meta("ground_contact_point", (root.get_meta("ground_contact_point") as Vector3) + delta)
+		if root.has_meta("trunk_collision"):
+			var shape := get_node_or_null(NodePath(root.get_meta("trunk_collision")))
+			if shape:
+				(shape.get_parent() as Node3D).global_position += delta
+		_placed.append({"pos": root.global_position, "radius": 3.5})
+		return true
+	if own_entry != null:
+		_placed.append(own_entry)
+	return false
+
 func _build_woodland() -> void:
 	# Mehrreihiger Mischwald entlang der Referenzgrenze, keine einzelne Reihe gleicher Tannen.
 	var species := ["l_tree", "l_tree2", "l_tree4", "e_treb1"]
@@ -532,6 +651,7 @@ func _batch_tree_visuals() -> void:
 		instance.material_override = batch.material
 		static_root.add_child(instance)
 		instance.add_to_group("bavaria_tree_batches")
+		SceneDetails.keep_xforms(instance, batch.transforms)
 	# Kinder vor Eltern entfernen; einige glTF-Modelle besitzen Mesh-Knoten als Wurzel.
 	for i in range(sources.size() - 1, -1, -1):
 		if is_instance_valid(sources[i]):
@@ -648,8 +768,9 @@ func bot_hint_stance(pos: Vector3) -> int:
 	return _bot_hint_data().stance_at(pos)
 
 ## Sichtweite nur auf dieser Karte: Kamera-far ≤ VIEW_FAR (beide Sichtweiten-Modi, auch NEU = 6 km). Spielfläche ≈ 116 m,
-## Randwald ≤ 40 m dahinter; Fernkulisse/Himmel sind Sky-Shader und hängen nicht von far ab.
-const VIEW_FAR := 800.0
+## Außenwald bis kurz vor den Panoramaring (r 260 m, panorama_ring.gd), davor Dorf und Werk; weite Sicht ist unnötig:
+## far = Ring + Grenzabstand + Reserve. Himmel (Sky-Shader) hängt nicht von far ab.
+const VIEW_FAR := 360.0
 
 func _clamp_view_far() -> void:
 	var cur: Dictionary = ViewDistanceScript.current

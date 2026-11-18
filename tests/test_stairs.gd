@@ -148,8 +148,9 @@ func _freeze_world(m: Mission) -> void:
 	for s in get_tree().get_nodes_in_group("soldiers"):
 		_park(s, far)
 		far.x += 3.0
-	if m.get("runtime") != null and is_instance_valid(m.get("runtime")):
-		(m.get("runtime") as Node).process_mode = Node.PROCESS_MODE_DISABLED
+	var rt = m.get("runtime")       # Bavaria: runtime ist kein Node (Skriptfehler im Lauf 0.11.5)
+	if is_instance_valid(rt) and rt is Node:
+		(rt as Node).process_mode = Node.PROCESS_MODE_DISABLED
 	for n in m.dynamic_root.get_children():
 		if n is VehicleBody3D or n is RigidBody3D:
 			(n as Node).process_mode = Node.PROCESS_MODE_DISABLED
@@ -313,6 +314,10 @@ func _make_stair(pts: Array, space: PhysicsDirectSpaceState3D) -> Stair:
 		pts.pop_back()
 	while pts.size() > 0 and not _free(space, pts[0]):
 		pts.pop_front()
+	# 0.11.7: im Gelände versunkene unterste Tritte abschneiden (BURMA1 T7–T10: sichtbare Tritte 0,4 m unter der
+	# Geländekollision, Soldat steht darüber → „hinunter✗“/„Fuß✗“, obwohl die Treppe begehbar ist)
+	while pts.size() > 0 and _buried(space, pts[0]):
+		pts.pop_front()
 	if pts.size() < MIN_TREADS:
 		return null
 	for p in pts:
@@ -334,7 +339,10 @@ func _make_stair(pts: Array, space: PhysicsDirectSpaceState3D) -> Stair:
 	var probe: Vector3 = pts[0] - d0 * 0.6
 	var q := PhysicsRayQueryParameters3D.create(probe + Vector3.UP * 0.1, probe + Vector3.DOWN * 0.6, 1)
 	var hit := space.intersect_ray(q)
-	if not hit.is_empty() and pts[0].y - hit.position.y < RISE_MAX + 0.05 and _free(space, hit.position):
+	# 0.11.7: Standpunkt nur, wenn die Soldatenkapsel dort auch unten Platz hat (BURMA1 T7/T8: Strahl traf eine schmale
+	# Rinne 0,4 m unter dem Gelände vor der Treppe – Soldat blieb 0,4 m darüber stehen, „hinunter✗“/„Fuß✗“ ohne Treppenfehler)
+	if not hit.is_empty() and pts[0].y - hit.position.y < RISE_MAX + 0.05 and _free(space, hit.position) \
+			and _free_low(space, hit.position):
 		st.bottom = hit.position
 	return st
 
@@ -348,6 +356,25 @@ func _free(space: PhysicsDirectSpaceState3D, p: Vector3) -> bool:
 	# Unterkante 0,42 m über dem Tritt: Treppen mit echter Stufenkollision (CZECH1/4 nach dem B-010-Ersatzkörperfix) –
 	# die nächste Setzstufe (bis 0,3 m) darf nicht schon als fehlender Kopfraum zählen
 	params.transform = Transform3D(Basis(), p + Vector3(0, 0.42 + 0.8, 0))
+	params.collision_mask = 1
+	return space.intersect_shape(params, 1).is_empty()
+
+
+## Tritt liegt unter fremder Kollision: senkrechter Strahl von 1 m darüber (Kopfraum frei) trifft eine Fläche > 0,2 m über dem Tritt
+func _buried(space: PhysicsDirectSpaceState3D, p: Vector3) -> bool:
+	var q := PhysicsRayQueryParameters3D.create(p + Vector3.UP * 1.0, p + Vector3.DOWN * 0.1, 1)
+	var hit := space.intersect_ray(q)
+	return not hit.is_empty() and hit.position.y > p.y + 0.2
+
+
+## Kapsel (r 0,25) mit Unterkante 0,08 m über p frei – p ist ein Standpunkt, keine Rinne/Spalte
+func _free_low(space: PhysicsDirectSpaceState3D, p: Vector3) -> bool:
+	var params := PhysicsShapeQueryParameters3D.new()
+	var cap := CapsuleShape3D.new()
+	cap.radius = 0.25
+	cap.height = 1.0
+	params.shape = cap
+	params.transform = Transform3D(Basis(), p + Vector3(0, 0.08 + 0.5, 0))
 	params.collision_mask = 1
 	return space.intersect_shape(params, 1).is_empty()
 

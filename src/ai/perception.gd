@@ -319,7 +319,7 @@ func _on_noise(pos: Vector3, radius: float, source: Node, team: int, kind: Strin
 
 func max_awareness() -> float:
 	var m := 0.0
-	for k in awareness:
+	for k in awareness.keys():          # 0.11.7: Kopie (freigegebene Schlüssel → Endlos-Iteration, s. forget_dead)
 		if is_instance_valid(k) and k.alive:
 			m = maxf(m, awareness[k])
 	return m
@@ -329,7 +329,7 @@ func max_awareness() -> float:
 func best_target() -> Soldier:
 	var best: Soldier = null
 	var best_d := INF
-	for t in visible_now:
+	for t in visible_now.keys():        # 0.11.7: Kopie (freigegebene Schlüssel → Endlos-Iteration, s. forget_dead)
 		if not is_instance_valid(t) or not t.alive or not visible_now[t]:
 			continue
 		if awareness.get(t, 0.0) < 1.0:
@@ -344,7 +344,11 @@ func best_target() -> Soldier:
 ## G-009/fix_performance: läuft je Physikbild – ohne Kopie der Schlüssel, nur bei Fund wird gelöscht.
 func forget_dead() -> void:
 	var gone: Array = []
-	for k in awareness:
+	# 0.11.7: über eine Schlüsselkopie – Iteration direkt über das Dictionary mit freigegebenen Objekt-Schlüsseln
+	# (Soldat nach Kartenwechsel/Respawn gelöscht) fand den Folgeschlüssel nicht und begann endlos von vorn
+	# (Endlosschleife + Speicherüberlauf „mem_new is null“ auf dem dedizierten Server, Soak 0.11.7).
+	# Iterate a key copy: iterating a dict with freed object keys restarted forever (infinite loop/OOM).
+	for k in awareness.keys():
 		if not is_instance_valid(k) or not k.alive:
 			gone.append(k)
 	for k in gone:

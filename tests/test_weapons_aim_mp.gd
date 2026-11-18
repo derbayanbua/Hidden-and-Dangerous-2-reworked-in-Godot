@@ -174,6 +174,14 @@ func _host() -> void:
 		"max_players": 8, "time_limit_min": 0, "score_limit": 0, "warmup_s": 0, "respawn_s": 5, "bots_per_team": 1,
 		"password": "", "allow_vehicles": false, "kill_cam": false, "friendly_fire": false, "hit_indicator": true})
 	t.check(ok and Net.is_online, "MP: Server gestartet (%s)" % map, Net.last_error)
+	# 0.11.7 [D]: kein Zielfernrohr-Ausgleich im MP, auch mit Settings.scope_zero an (Kugel fällt realistisch)
+	var sz_old: bool = Settings.scope_zero
+	var fc_old: int = Ballistics.force_compensation
+	Settings.scope_zero = true
+	Ballistics.force_compensation = -1
+	t.check(not Ballistics.scope_compensation_enabled(), "MP: kein Zielfernrohr-Ausgleich (scope_zero an)")
+	Settings.scope_zero = sz_old
+	Ballistics.force_compensation = fc_old
 	await wait_for(func(): return Game.current_mission() != null and Game.current_mission().is_node_ready() and Net._soldiers.has(1), 400.0)
 	var mm: Mission = Game.current_mission()
 	await wait_for(func(): return mm.nav_ready and _bots().size() == 2, 300.0)

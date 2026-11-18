@@ -20,9 +20,17 @@ var squad: SquadManager
 ## B-047: Standard HALTEN – zu Missionsbeginn bleiben Kameraden stehen, bis „Folgen“ befohlen wird. Original: bei
 ## Truppbildung wird keine Folge-Bindung (Soldat +0x2CC, 0x5A91A0) gesetzt; Aufrufer sind nur Befehle („Folgt mir“/
 ## „Neu sammeln“), Spielstand-Laden (0x594DD0, Block 8000) und Teamwechsel; Soldatenwechsel löst sie (0x4593E0) [P].
+## 0.11.7 [D, Vorgabe]: SP-Originalmissionen/Übungseinsätze zusätzlich Feuer halten ohne Selbstschutzfeuer, bis zum
+## ersten Befehl (SquadManager.apply_start_state, `awaiting_order`; alter Stand: --squad_start=legacy).
 var order: int = Order.HOLD
 var _hold_init := false          ## Startplatz erst im ersten Takt übernehmen (Akteure werden nach setup platziert)
-var roe: int = ROE.FIRE_AT_WILL
+var roe: int = ROE.FIRE_AT_WILL:
+	set(v):
+		roe = v
+		awaiting_order = false     # jede Feuerregel (Feuer frei/halten/Angriff) ist ein Befehl
+## 0.11.7 [D, Vorgabe]: noch kein Befehl seit Missionsstart → kein Feuer, auch nicht unter Beschuss
+## (SquadManager.apply_start_state). Jeder Befehl (Bewegung, Feuerregel, Aufgabe) hebt es auf.
+var awaiting_order := false
 var hold_pos := Vector3.ZERO
 var hold_yaw := 0.0
 var stance_override := -1        ## -1 = Haltung des Anführers übernehmen
@@ -65,6 +73,7 @@ const COVER_ORDER_RADIUS := 20.0
 
 func set_order(o: int, pos := Vector3.ZERO, quiet_mode := false) -> void:
 	order = o
+	awaiting_order = false
 	_hold_init = true
 	_cover = Vector3.INF
 	quiet = quiet_mode
@@ -142,6 +151,8 @@ func _may_fire(_leader: Soldier) -> bool:
 	# 0.10.7 leiser Befehl: selbständig nur mit Schalldämpferwaffe, sonst Feuer halten (auch unter Beschuss)
 	if is_quiet() and silenced_slot() < 0:
 		return false
+	if awaiting_order:
+		return false
 	if roe == ROE.FIRE_AT_WILL or _under_fire > 0.0:
 		return true
 	return roe == ROE.ON_MY_LEAD and _lead_fire_window > 0.0
@@ -181,6 +192,9 @@ func _physics_process(delta: float) -> void:
 		_hold_init = true
 		hold_pos = soldier.global_position
 		hold_yaw = soldier.look_yaw
+	if awaiting_order and (grenade_target.is_finite() or suppress_time > 0.0 or launcher_target.is_finite() \
+			or action_target != null):
+		awaiting_order = false    # Aufgabe aus dem Befehlsmenü = Befehl
 	_under_fire = maxf(_under_fire - delta, 0.0)
 	_report_cooldown = maxf(_report_cooldown - delta, 0.0)
 	perception.forget_dead()
@@ -755,7 +769,7 @@ func order_name() -> String:
 
 func serialize() -> Dictionary:
 	return {"order": order, "roe": roe, "hold": [hold_pos.x, hold_pos.y, hold_pos.z], "stance": stance_override,
-		"quiet": quiet, "quiet_fire": quiet_fire, "strict": strict_hold, "plan": plan, "paused": plan_paused}
+		"quiet": quiet, "quiet_fire": quiet_fire, "strict": strict_hold, "plan": plan, "paused": plan_paused, "await": awaiting_order}
 
 
 func deserialize(d: Dictionary) -> void:
@@ -770,3 +784,4 @@ func deserialize(d: Dictionary) -> void:
 	stance_override = int(d.get("stance", -1))
 	var h: Array = d.get("hold", [0, 0, 0])
 	hold_pos = Vector3(h[0], h[1], h[2])
+	awaiting_order = bool(d.get("await", false))   # nach roe-Setter setzen

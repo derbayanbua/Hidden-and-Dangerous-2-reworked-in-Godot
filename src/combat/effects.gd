@@ -3,10 +3,15 @@ extends Node
 ## Klänge kommen ausschließlich aus den Originaldaten (OrigAudio, orig_cache/sounds.json, tools/fmt_sounds.py);
 ## die früheren synthetisierten Platzhalterklänge sind entfallen. Ohne Originaldaten bleibt es still.
 
-const MAX_DECALS := 80
+const MAX_DECALS := 160    ## 0.11.7: Ring-Puffer Einschusslöcher + Brandflecken (älteste fallen weg), vorher 80
+## 0.11.7 Einschusslöcher deutlich erkennbar [D] (Original-Größe x_decal%02d.tga nicht dekodiert): 12 cm Decal =
+## fast schwarzer Kern (~3,5 cm), dunkler ausgefranster Ring, weicher Staub-/Schmauchhof; zufällig gedreht
+const HOLE_SIZE := 0.12
 
 var _decals: Array[Node3D] = []
 var _hole_tex: Texture2D
+var holes_made := 0        ## Zähler erzeugter Einschusslöcher (Tests)
+var last_hole: Decal       ## zuletzt erzeugtes Einschussloch (Tests)
 var _blood_tex: Texture2D
 var _container: Node3D
 var blood_fx: Node      ## src/combat/blood_fx.gd
@@ -14,7 +19,7 @@ var blood_fx: Node      ## src/combat/blood_fx.gd
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_PAUSABLE
-	_hole_tex = _radial_texture(Color(0.05, 0.05, 0.05, 0.95), 32)
+	_hole_tex = hole_texture(64)
 	_blood_tex = _radial_texture(Color(0.35, 0.02, 0.02, 0.9), 32)
 	blood_fx = preload("res://src/combat/blood_fx.gd").new()
 	blood_fx.name = "BloodFx"
@@ -228,7 +233,10 @@ static func _flash_star_texture(res: int) -> Texture2D:
 ## Einschlag: Staub, Einschussloch und Original-Einschlagklang je Untergrund (hdmaterials.def +0x30)
 func impact(pos: Vector3, normal: Vector3) -> void:
 	_puff(pos, normal, Color(0.45, 0.4, 0.33, 0.8), 6)
-	_decal(pos, normal, _hole_tex, 0.06)
+	var d := _decal(pos, normal, _hole_tex, HOLE_SIZE, randf() * TAU)
+	if d:
+		holes_made += 1
+		last_hole = d
 	OrigAudio.play_impact(pos - normal * 0.02)
 
 
@@ -357,28 +365,63 @@ func _puff(pos: Vector3, normal: Vector3, color: Color, amount: int) -> void:
 	p.finished.connect(p.queue_free)
 
 
-func _decal(pos: Vector3, normal: Vector3, tex: Texture2D, size: float) -> void:
+func _decal(pos: Vector3, normal: Vector3, tex: Texture2D, size: float, spin := 0.0) -> Decal:
 	if not Settings.decals:
-		return   # Original-Option „FUSSSPUREN, DEKORATIONEN“
+		return null   # Original-Option „FUSSSPUREN, DEKORATIONEN“
 	var parent := _parent()
 	if parent == null:
-		return
+		return null
 	var d := Decal.new()
 	d.texture_albedo = tex
 	d.size = Vector3(size, 0.1, size)
 	d.cull_mask = 1
+	# 0.11.7: volle Deckkraft an der Fläche (Projektionsbox ±5 cm, Fläche liegt in der Mitte), keine Verzerrung an Kanten
+	d.upper_fade = 0.1
+	d.lower_fade = 0.1
+	d.normal_fade = 0.25
 	parent.add_child(d)
 	d.global_position = pos
 	# Decal projiziert entlang -Y: Y-Achse an der Normalen ausrichten.
 	var up := normal.normalized()
 	var ref := Vector3.FORWARD if absf(up.dot(Vector3.FORWARD)) < 0.95 else Vector3.RIGHT
 	var x := ref.cross(up).normalized()
-	d.global_basis = Basis(x, up, x.cross(up)).orthonormalized()
+	d.global_basis = Basis(x, up, x.cross(up)).orthonormalized().rotated(up, spin)
 	_decals.append(d)
-	if _decals.size() > MAX_DECALS:
+	while _decals.size() > MAX_DECALS:
 		var old: Node3D = _decals.pop_front()
 		if is_instance_valid(old):
 			old.queue_free()
+	return d
+
+
+## 0.11.7: Einschussloch-Textur (prozedural, keine Originaldaten): Kern fast schwarz, Ring dunkelbraun-grau mit
+## ausgefranstem Rand (Winkelrauschen), weicher Schmauch-/Staubhof bis zum Rand. Hoher Kontrast auf Schnee, Holz,
+## Metall, Stein und Putz; der Hof bleibt auch auf Entfernung/im Zielfernrohr als Fleck erkennbar.
+static func hole_texture(res: int) -> Texture2D:
+	var img := Image.create(res, res, false, Image.FORMAT_RGBA8)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7117
+	var jag: Array[float] = []
+	for i in 16:
+		jag.append(rng.randf_range(-0.07, 0.07))
+	var c := Vector2(res, res) * 0.5
+	for y in res:
+		for x in res:
+			var v := (Vector2(x + 0.5, y + 0.5) - c) / (res * 0.5)
+			var r := v.length()
+			var a := fposmod(v.angle() / TAU, 1.0) * 16.0
+			var j: float = lerpf(jag[int(a) % 16], jag[(int(a) + 1) % 16], a - floorf(a))
+			var col: Color
+			if r < 0.26 + j * 0.5:
+				col = Color(0.015, 0.012, 0.01, 1.0)                                   # Loch
+			elif r < 0.46 + j:
+				col = Color(0.10, 0.085, 0.07, 0.92)                                    # zerrissener Rand
+			else:
+				var t := clampf((r - (0.46 + j)) / (1.0 - (0.46 + j)), 0.0, 1.0)
+				col = Color(0.16, 0.14, 0.12, 0.55 * pow(1.0 - t, 1.6))               # Schmauch-/Staubhof
+			img.set_pixel(x, y, col)
+	img.generate_mipmaps()
+	return ImageTexture.create_from_image(img)
 
 
 # --- Atmosphäre (Übungseinsätze; Originalmissionen haben ihre Klangquellen aus sounds.bin) -----------
