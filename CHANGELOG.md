@@ -2,6 +2,22 @@
 
 
 
+## 0.11.8 (19.11.2026)
+
+**DE**
+- **Schießstand als Testkarte im Einzelspieler:** „Schießstand (Test)“ steht unter EINZELSPIELER › EINZELMISSION bei den
+  Übungseinsätzen und startet direkt mit Briefing und Übungsausrüstung; Kampagnenstand bleibt unberührt.
+- **Missionsliste mit Bildlauf:** lange Einzelmissions-/Kampagnenlisten laufen nicht mehr aus dem Bild, sondern lassen sich
+  scrollen; die gewählte Mission wird sichtbar gehalten.
+
+**EN**
+- **Shooting range as a test map in single player:** "Schießstand (Test)" is listed under SINGLE PLAYER › SINGLE MISSION
+  with the practice missions and starts directly with briefing and practice equipment; campaign progress is untouched.
+- **Scrollable mission list:** long single-mission/campaign lists no longer run off the screen but scroll; the selected
+  mission is kept visible.
+
+
+
 ## 0.11.7 (18.11.2026)
 
 **DE**

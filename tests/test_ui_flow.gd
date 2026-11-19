@@ -245,9 +245,8 @@ func _run() -> void:
 	btn("bsingle mission- carnage").pressed.emit()
 	await frames(2)
 	var ids: Array = []
-	for c in menu.stage.get_children():
-		if c is Button and c.has_meta("mission"):
-			ids.append(String(c.get_meta("mission")))
+	for c in menu.mission_buttons():
+		ids.append(String(c.get_meta("mission")))
 	check(menu.current_menu == "single_mission" and Game.single_mission and Game.sp_game_type() == 7
 		and ids.has("a2_erkundung") and not ids.has("m01_funkfeuer"), "EINZELMISSION – BLUTBAD: freigeschaltete Originalteile", str(ids))
 	Game.campaign["completed"].append("a2_erkundung")

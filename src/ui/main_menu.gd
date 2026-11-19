@@ -595,10 +595,24 @@ func _open_mode(m: int, single: bool) -> void:
 
 
 func _select_mission(id: String) -> void:
-	for c in stage.get_children():
-		if c is Button and c.has_meta("mission") and String(c.get_meta("mission")) == id and not (c as Button).disabled:
-			(c as Button).button_pressed = true
-			(c as Button).pressed.emit()
+	for c in mission_buttons():
+		if String(c.get_meta("mission")) == id and not c.disabled:
+			c.button_pressed = true
+			c.pressed.emit()
+			var sc := stage.get_node_or_null("MissionList") as ScrollContainer
+			if sc:
+				sc.ensure_control_visible(c)
+
+
+## Missionsknöpfe der aktuellen Liste (im Bildlauf „MissionList“)
+func mission_buttons() -> Array[Button]:
+	var out: Array[Button] = []
+	var list := stage.get_node_or_null("MissionList/MissionButtons")
+	if list:
+		for c in list.get_children():
+			if c is Button and c.has_meta("mission"):
+				out.append(c)
+	return out
 
 
 ## Kampagne (Originalteile; Modus Kampagne/Einzelgänger/Blutbad) bzw. Einzelmission (freigeschaltete Teile + eigene
@@ -619,7 +633,18 @@ func _mission_list(kind: String) -> void:
 			ids.append_array(Game.PRACTICE_MISSIONS)
 	selected_mission = ""
 	_start_btn = null
-	var y := 132.0
+	# 0.11.8: Liste in einem Bildlauf (linke Spalte bis über den unteren Rand), statt aus dem Bild zu laufen
+	var scroll := ScrollContainer.new()
+	scroll.name = "MissionList"
+	scroll.position = Vector2(70, 132)
+	scroll.size = Vector2(424, 556)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	stage.add_child(scroll)
+	var list := VBoxContainer.new()
+	list.name = "MissionButtons"
+	list.add_theme_constant_override("separation", 4)
+	list.custom_minimum_size = Vector2(410, 0)
+	scroll.add_child(list)
 	var n := 1
 	for id in ids:
 		var unlocked := Game.is_unlocked(id)
@@ -631,8 +656,9 @@ func _mission_list(kind: String) -> void:
 		var b := Button.new()
 		b.text = label
 		b.set_meta("mission", id)
-		b.position = Vector2(72, y)
-		b.size = Vector2(410, 30)
+		b.name = ("mission_" + String(id)).validate_node_name()
+		b.custom_minimum_size = Vector2(410, 30)
+		b.clip_text = true
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		b.toggle_mode = true
 		b.disabled = not unlocked or Game.roster_exhausted()
@@ -648,9 +674,9 @@ func _mission_list(kind: String) -> void:
 		b.pressed.connect(func():
 			_click.play()
 			selected_mission = id
-			for c in stage.get_children():
-				if c is Button and c.toggle_mode and c != b:
-					(c as Button).button_pressed = false
+			for c in mission_buttons():
+				if c != b:
+					c.button_pressed = false
 			desc.text = Game.briefing_text(id).substr(0, 900)
 			if is_instance_valid(_start_btn):
 				_start_btn.disabled = false)
@@ -658,8 +684,7 @@ func _mission_list(kind: String) -> void:
 			if ev is InputEventMouseButton and ev.double_click and not b.disabled:
 				selected_mission = id
 				_show_briefing(id))
-		stage.add_child(b)
-		y += 34.0
+		list.add_child(b)
 		n += 1
 	_start_btn = _button("single_mission", "bload mission", text(2357), Rect2(525.4, 629.6, 201.8, 35.8),
 		_start_selected, true)

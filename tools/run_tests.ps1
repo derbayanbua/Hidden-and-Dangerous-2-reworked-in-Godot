@@ -57,6 +57,7 @@ $suites = @(
   @{ name = "test_sas_values"; args = "--headless -- --mission=m01_funkfeuer --autoplay=test_sas_values" },
   @{ name = "test_mp_classes"; args = "--headless -- --mission=m01_funkfeuer --autoplay=test_mp_classes" },
   @{ name = "test_ui_flow";  args = "--headless -- --autoplay=test_ui_flow --profiles_dir=user://test_ui_flow --noimport" },
+  @{ name = "test_range_menu"; args = "--headless -- --autoplay=test_range_menu --profiles_dir=user://test_range_menu --noimport"; timeout = 600 },   # 0.11.8 Schiessstand im SP-Menue
   @{ name = "test_language"; args = "--headless -- --autoplay=test_language --profiles_dir=user://test_language --noimport" },
   @{ name = "test_b022b";    args = "--headless -- --autoplay=test_b022b --profiles_dir=user://test_b022b --noimport" },
   @{ name = "test_tactical"; args = "--headless -- --mission=m01_funkfeuer --autoplay=test_tactical" },
