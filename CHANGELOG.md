@@ -2,6 +2,65 @@
 
 
 
+## 0.11.9 (21.11.2026)
+
+**DE**
+- **AFRICA2 – Fahrspur sichtbar:** Die hochskalierten Sand-/Spurtexturen hatten die Struktur weggeglättet (Reifenspuren der
+  Strecke kaum erkennbar). Die Texturprüfung lehnt jetzt KI-Fassungen mit starkem Kontrastverlust ab; das Spiel nimmt dafür
+  die Originaltextur (betrifft auch andere Karten mit demselben Fehler).
+- **AFRICA2 – angreifende Flugzeuge:** Wenderate im Anflug wie im Original 0,4 rad/s statt geschätzter 0,9 rad/s – die
+  Bf 109 drehen langsamer und greifen deutlich seltener an.
+- **AFRICA2 – Leichen/Gegnerbestand:** `HUMAN_Kill` tötet wie im Original sofort (vorher Angriffsauftrag); die fünf
+  Leichen am Lager standen dadurch als lebende Gegner herum. Alle 32 Figuren aus den Originaldaten sind vorhanden.
+- **AFRICA2 – Gegner nach der ersten Kurve:** Gegner sahen einen Trupp im Fahrzeug nie, weil die eigene Karosserie des
+  Ziels jeden Sichtstrahl verdeckte. Jetzt erkennen sie Jeep-/Lkw-Besatzungen; das MG-Nest besetzt bei Alarm das MG 42
+  und schießt wie im Originalskript.
+- **Bordwaffen im Trupp:** Auch am Bordwaffensitz gilt „Feuer halten bis zum ersten Befehl“; nach der Freigabe (z. B. Taste K)
+  feuert der Kamerad vom Sitz. Die Freigabe bleibt beim Ein- und Umsteigen erhalten (Test ergänzt).
+- **Flak 38 auf dem Opel Blitz:** Die Rohrachse wurde aus dem Versatz des Rohr-Frames berechnet und zeigte rund 45° nach
+  unten. Das Geschütz lief deshalb in den Höhenanschlag, und die Schüsse verließen die Mündung neben dem Rohr. Jetzt folgt
+  die Achse dem Mündungspunkt (SHDUM) des Originalmodells; Rohr, Visier und Schuss stimmen überein. Der neue Test
+  `test_mounted_guns` prüft alle Bordwaffen auf Fahrzeugen aller Karten: Befestigung, Mündung, Richten und Treffer auf ein
+  stehendes Ziel.
+- **Scharfschütze trifft wieder (Einzel- und Mehrspieler):** Der Original-Rückstoß wurde bisher auf jede Kugel gerechnet.
+  Im Original verstellt er nach dem Schuss nur die Blickrichtung; die Kugel fliegt mit der normalen Streuung dorthin, wohin
+  das Absehen zeigt. Mit Zielfernrohr wich jede Kugel bisher bis etwa 2° nach oben ab, ab 50 m ging fast jeder Schuss
+  vorbei. Gemessen mit zwei Spielprozessen und der Klasse Scharfschütze auf 20–150 m: vorher 10 von 96 Treffern, jetzt
+  93 von 96 (Rumpf angezielt, stehend/hockend/liegend). Der alte Stand ist mit `--recoil_bullet=1` abrufbar.
+- **Mehrspieler – Verzugsausgleich:** Der Server prüft Schüsse von Clients jetzt gegen die Lage, die der Schütze gesehen hat
+  (Ping + Darstellungsverzögerung, höchstens 350 ms). Vorher zielte man online auf eine bewegte Figur, die beim Server schon
+  weiter war. Gemessen bei 120 ms Ping und einem quer laufenden Ziel: vorher 1 von 8 Treffern bestätigt, jetzt 5 von 8.
+  Neuer Test `test_mp_sniper` (Host und Client, dediziert mit künstlichem Verzug als `test_mp_sniper_online`).
+
+**EN**
+- **AFRICA2 – visible track:** The upscaled sand/track textures had smoothed away their detail (the route's tyre tracks were
+  barely visible). The texture check now rejects AI versions with strong contrast loss; the game falls back to the original
+  texture (also fixes other maps with the same defect).
+- **AFRICA2 – attacking aircraft:** Turn rate on approach is now 0.4 rad/s as in the original instead of an estimated
+  0.9 rad/s – the Bf 109s turn more slowly and attack much less often.
+- **AFRICA2 – corpses/enemy roster:** `HUMAN_Kill` now kills instantly as in the original (previously an attack order); the
+  five corpses at the camp were standing around as live enemies. All 32 figures from the original data are present.
+- **AFRICA2 – enemies after the first bend:** Enemies never saw a squad riding in a vehicle because the target's own body
+  blocked every line of sight. They now detect jeep/truck crews; the MG nest mans the MG 42 on alarm and fires as in the
+  original script.
+- **Vehicle guns in the squad:** "Hold fire until the first order" also applies on a vehicle weapon seat; once released
+  (e.g. key K) the squad mate fires from the seat. The release is kept when boarding or switching seats (test added).
+- **Flak 38 on the Opel Blitz:** The bore axis was taken from the offset of the barrel frame and pointed about 45° downwards.
+  The gun ran into its elevation stop and shots left the muzzle away from the barrel. The axis now follows the muzzle
+  point (SHDUM) of the original model, so barrel, sight and shot match. The new test `test_mounted_guns` checks every
+  vehicle-mounted gun on all maps: mounting, muzzle, aiming and a hit on a stationary target.
+- **Sniper hits again (single and multiplayer):** The original recoil was applied to every bullet. In the original it only
+  shifts the view direction after the shot; the bullet flies with the normal spread to where the reticle points. With a
+  scope every bullet used to deviate up to about 2° upwards, so almost every shot beyond 50 m missed. Measured with two game
+  processes and the sniper class at 20–150 m: before 10 of 96 hits, now 93 of 96 (aiming at the torso, standing/crouched/
+  prone). The old behaviour is available with `--recoil_bullet=1`.
+- **Multiplayer – lag compensation:** The server now checks client shots against the position the shooter actually saw
+  (ping + display delay, at most 350 ms). Before, online players aimed at a moving figure that was already further along on
+  the server. Measured at 120 ms ping with a target walking sideways: before 1 of 8 hits confirmed, now 5 of 8.
+  New test `test_mp_sniper` (host and client; dedicated with simulated delay as `test_mp_sniper_online`).
+
+
+
 ## 0.11.8 (19.11.2026)
 
 **DE**

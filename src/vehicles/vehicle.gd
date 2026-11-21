@@ -258,9 +258,7 @@ func _turret_of(seat: Node3D) -> Dictionary:
 	if hort == null and vert == null:
 		return {}
 	var pivot: Node3D = vert if vert else hort
-	var axis := Vector3.FORWARD
-	if barrel and barrel.position.length() > 0.05 and barrel.get_parent() == pivot:
-		axis = barrel.position.normalized()
+	var axis := rig_axis(pivot, barrel, muzzle)
 	# Nummer des Waffensitzes (HORTnn/VERTnn/BARRELnn_xx) für die Rohr-Parameter
 	var num := -1
 	var src: Node3D = hort if hort else vert
@@ -271,6 +269,40 @@ func _turret_of(seat: Node3D) -> Dictionary:
 		"base_h": hort.transform if hort else Transform3D(), "base_v": vert.transform if vert else Transform3D(),
 		"yaw": 0.0, "pitch": 0.0, "weapon": null, "ysign": 0.0, "psign": 0.0,
 		"hs": TURRET_SPEED, "vs": TURRET_SPEED, "up": NO_LIMIT, "down": NO_LIMIT, "left": NO_LIMIT, "right": NO_LIMIT}
+
+
+## 0.11.9: Rohrachse im Raum des Richt-Frames (VERT bzw. HORT). Maßgeblich ist die Mündung SHDUM: ihre Lage im
+## Rohr-Frame BARRELnn_00 liegt entlang einer Rohrachse (Opel Blitz Flak 38: SHDUM00 = (0; 0,09; −1,96)), deren
+## Vorzeichen-Hauptachse ist die Seelenachse. Vorher galt der Versatz des Rohr-Frames zum Richt-Frame als Achse – beim
+## Opel Flak (BARREL02_00 = (0; −0,09; −0,08) unter VERT02) zeigte das Rohr rechnerisch ~50° nach unten: Höhenrichten
+## lief in den Anschlag (Rohr „hängt“), Blick/Schuss wichen vom Rohr ab. Ohne Mündung: alter Weg (Rohrversatz) [B Daten]
+## 0.11.9: bore axis in the aiming frame (VERT/HORT), derived from the muzzle SHDUM inside BARRELnn_00.
+static func rig_axis(pivot: Node3D, barrel: Node3D, muzzle: Node3D) -> Vector3:
+	if pivot == null:
+		return Vector3.FORWARD
+	if muzzle:
+		var ref: Node3D = barrel if barrel and _rel_xform(muzzle, barrel) != null else pivot
+		var mt = _rel_xform(muzzle, ref)
+		var rt = _rel_xform(ref, pivot) if ref != pivot else Transform3D()
+		if mt != null and rt != null and (mt as Transform3D).origin.length() > 0.3:
+			var m: Vector3 = (mt as Transform3D).origin
+			var a := m.abs()
+			var d := Vector3(signf(m.x), 0, 0) if a.x >= a.y and a.x >= a.z else (Vector3(0, signf(m.y), 0) if a.y >= a.z else Vector3(0, 0, signf(m.z)))
+			return ((rt as Transform3D).basis * d).normalized()
+	if barrel and barrel.position.length() > 0.05 and barrel.get_parent() == pivot:
+		return barrel.position.normalized()
+	return Vector3.FORWARD
+
+
+## Transform von n relativ zum Vorfahren anc (auch außerhalb des Baums), null wenn anc kein Vorfahre ist
+static func _rel_xform(n: Node, anc: Node) -> Variant:
+	var t := Transform3D()
+	while n != null and n != anc:
+		if not (n is Node3D):
+			return null
+		t = (n as Node3D).transform * t
+		n = n.get_parent()
+	return t if n == anc else null
 
 
 static var _barrel_cache := {}

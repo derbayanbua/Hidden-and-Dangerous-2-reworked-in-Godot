@@ -10,10 +10,12 @@ OrigLevel._swap_textures überspringt die dort gelisteten Dateien und nimmt die 
 import os
 import sys
 import warnings
-from PIL import Image
+from PIL import Image, ImageStat
 
 warnings.filterwarnings("ignore")
 COLOR_LIMIT = 40
+CONTRAST_LIMIT = 0.6     # 0.11.9: Helligkeits-Streuung KI/Original mindestens 60 %
+CONTRAST_MIN_SD = 4.0    # nur strukturierte Originale (fast einfarbige Flächen ausgenommen)
 
 
 def check(root: str, write: bool) -> int:
@@ -61,6 +63,14 @@ def check(root: str, write: bool) -> int:
             dmax = max(abs(a - b) for x, y in zip(so.getdata(), sh.getdata()) for a, b in zip(x, y))
             if dmax > COLOR_LIMIT:
                 reject[f] = "Farbabweichung %d" % dmax
+                continue
+            # 0.11.9 (AFRICA2 „Strecke schlecht sichtbar“): KI-Fassung glättet die Struktur weg (Reifenspuren
+            # g_af2_009*: Helligkeits-Streuung 13,8 -> 6,0). Streuung der Helligkeit auf Originalgröße < 60 % → ablehnen
+            lo = ImageStat.Stat(ao.convert("L")).stddev[0]
+            if lo > CONTRAST_MIN_SD:
+                lh = ImageStat.Stat(hh.convert("L")).stddev[0]
+                if lh < lo * CONTRAST_LIMIT:
+                    reject[f] = "Kontrastverlust %.2f" % (lh / lo)
         print("%s: %d Dateien, ohne Original %d, abgelehnt %d" % (suf, len(files), missing, len(reject)))
         for f, why in list(reject.items())[:40]:
             print("  %-40s %s" % (f, why))

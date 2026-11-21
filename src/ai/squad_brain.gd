@@ -227,6 +227,8 @@ func _physics_process(delta: float) -> void:
 	if soldier.vehicle != null:
 		# Mitfahrer: nicht laufen, aber auf Feinde feuern (Feuerregel beachten)
 		var tv := perception.best_target()
+		# 0.11.9 Vorgabe [D]: auch am Bordwaffensitz gilt die Startsperre (awaiting_order) bis zum ersten Befehl; die
+		# Freigabe bleibt beim Ein-/Umsteigen erhalten (Zustand gehört zum Gehirn, board/switch_seat ändern ihn nicht).
 		if tv and _may_fire(leader) and soldier.seat_index > 0:
 			engage(tv, delta)
 		else:

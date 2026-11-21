@@ -16,7 +16,12 @@ extends Node3D
 ##   Skalierung Gesundheit/Schaden wie bei Menschen (OrigMission.HP_SCALE = 0,5).
 
 const SPEED := 100.0
-const TURN_RATE := 0.9          ## [E] rad/s
+## 0.11.9 [B]: Wenderate im Anflug (Phase 1) = ±_DAT_0080f554 = 0,4 rad/s – 0x5E5960 setzt über 0x5E7550 den
+## Gierwert +0x13C = sign(Winkel)·0,4 (erst Kurvenradius, dann überschrieben) und dreht je Bild um dt·+0x13C·0,001
+## (RotateYMatrix @0x5E6680). Vorher [E] 0,9 rad/s → Wende in ~3,5 s statt ~7,9 s, gut doppelt so viele Anflüge
+## (AFRICA2-Befund „Flugzeuge greifen zu viel an“). Querlage +0x144 folgt +0x13C mit 0,0005/ms.
+const TURN_RATE := 0.4
+const BANK_RATE := 0.5          ## [B] _DAT_0080fa00 0,0005/ms
 const FIRE_INTERVAL := 0.025    ## [O] 25 ms
 const FIRE_RANGE := 200.0       ## [O]
 const BULLET_SPEED := 800.0     ## [E]
@@ -215,7 +220,7 @@ func _turn_towards(want: Vector3, delta: float) -> void:
 	h = h.normalized()
 	var ang := h.signed_angle_to(want, Vector3.UP)
 	var step := clampf(ang, -TURN_RATE * delta, TURN_RATE * delta)
-	_bank = lerpf(_bank, clampf(-ang, -0.8, 0.8), delta * 2.0)
+	_bank = move_toward(_bank, -signf(ang) * TURN_RATE if absf(ang) > 0.001 else 0.0, BANK_RATE * delta)
 	var nh := h.rotated(Vector3.UP, step)
 	var y := dir.y
 	dir = Vector3(nh.x * sqrt(maxf(1.0 - y * y, 0.0)), y, nh.z * sqrt(maxf(1.0 - y * y, 0.0)))
@@ -251,7 +256,7 @@ func _orient(delta: float) -> void:
 	if dir.length() < 0.01:
 		return
 	if state != 1:
-		_bank = lerpf(_bank, 0.0, delta * 1.5)
+		_bank = move_toward(_bank, 0.0, BANK_RATE * delta)
 	var b := Basis.looking_at(dir, Vector3.UP)
 	b = b * Basis(Vector3.FORWARD, _bank)
 	global_basis = b

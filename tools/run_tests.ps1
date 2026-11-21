@@ -48,6 +48,8 @@ $suites = @(
   @{ name = "test_aim_ballistics"; args = "--headless -- --mission=a1_blizzard --autoplay=test_aim_ballistics" },   # 0.10.1 Visier/Ballistik/Muendungsfeuer/Atem
   @{ name = "test_weapons_aim"; args = "--headless -- --mission=a1_blizzard --autoplay=test_weapons_aim"; timeout = 1800 },   # 0.11.6 Visier = Einschlag (SP)
   @{ name = "test_weapons_aim_mp"; args = "--headless -- --autoplay=test_weapons_aim --phase=mp"; mp = $true; timeout = 1800 },   # 0.11.6 Visier = Einschlag (MP Host/Client)
+  @{ name = "test_mp_sniper"; args = "--headless -- --autoplay=test_mp_sniper"; mp = $true; timeout = 1800 },   # 0.11.9 Scharfschuetze MP: Host + Client, 20-150 m, 3 Haltungen, bewegtes Ziel
+  @{ name = "test_mp_sniper_online"; args = "--headless -- --autoplay=test_mp_sniper --ms_dedicated=1 --net_lag_ms=120 --net_jitter_ms=30"; mp = $true; timeout = 1800 },   # 0.11.9 dediziert, 120 ms Verzug, Verzugsausgleich
   @{ name = "test_range"; args = "--headless -- --mission=test_range --autoplay=test_range --test_timeout=36000"; group = "range"; timeout = 36600 },   # 0.11.7 Schiessstand, optional (nur -Only test_range)
   @{ name = "test_range_zonen"; args = "--headless -- --mission=test_range --autoplay=test_range --phase=zonen --weapons=enfield,kar98k,garand,o_17,o_28 --dists=100,200,300 --modes=zoom --stances=steh --test_timeout=3000"; group = "range"; timeout = 3600 },   # 0.11.7 Teillauf Gewehre/Sniper 100-300 m
   @{ name = "test_a2";       args = "--headless -- --mission=a2_erkundung --autoplay=test_orig_part --commandos=1" },
@@ -87,8 +89,10 @@ $suites = @(
   @{ name = "test_af1_fuel_tanks"; args = "--headless -- --mission=af1_spaghetti_airport --autoplay=test_af1_fuel_tanks"; timeout = 1700 },   # Treibstofftanks: Kollision/Navmesh/Zerstörung (Mischmaterial-Meshes)
   @{ name = "test_af1_finale"; args = "--headless -- --mission=af1_spaghetti_airport --autoplay=test_af1_finale" },
   @{ name = "test_af_air";   args = "--headless -- --mission=af2_flugschau --autoplay=test_af_air" },
+  @{ name = "test_af2";      args = "--headless -- --mission=af2_flugschau --autoplay=test_af2" },   # 0.11.9 AFRICA2 Gegner/Bordschuetze/Flugzeug
   @{ name = "test_items";    args = "--headless -- --mission=af1_spaghetti_airport --autoplay=test_items" },
   @{ name = "test_vehicle_types"; args = "--headless -- --mission=af1_spaghetti_airport --autoplay=test_vehicle_types"; timeout = 2400 },
+  @{ name = "test_mounted_guns"; args = "--headless -- --mission=af1_spaghetti_airport --autoplay=test_mounted_guns"; timeout = 2400 },   # 0.11.9 Bordwaffen aller Karten
   @{ name = "test_tank";     args = "--headless -- --mission=af1_spaghetti_airport --autoplay=test_tank" },
   @{ name = "test_vehicle_sight"; args = "--headless -- --mission=af1_spaghetti_airport --autoplay=test_vehicle_sight" },   # Visiersicht 4:3-Maske je Seitenverhaeltnis
   @{ name = "test_tank_rockets"; args = "--headless -- --mission=af1_spaghetti_airport --autoplay=test_tank_rockets" },   # Raketen gegen panzer01 (docs/status/panzer_schaden.md)

@@ -282,6 +282,11 @@ func _line_of_sight(space: PhysicsDirectSpaceState3D, from: Vector3, to: Vector3
 	var ex: Array[RID] = [soldier.get_rid()]
 	if soldier.vehicle is CollisionObject3D:
 		ex.append((soldier.vehicle as CollisionObject3D).get_rid())   # Besatzung sieht nicht gegen die eigene Wanne
+	# 0.11.9 (AFRICA2 „Gegner nach der ersten Kurve verhalten sich falsch“): das Fahrzeug, in dem das Ziel sitzt, verdeckt es
+	# nicht – vorher traf jeder Sichtstrahl zur Jeep-/Opel-Besatzung die eigene Karosserie des Ziels, Gegner sahen einen
+	# fahrenden Trupp nie (MG-Nest AF2_15 blieb stumm). Wie AirAttack 0x5E5960 (Strahl auf das Fahrzeug des Ziels zählt) [P].
+	if target != null and target.vehicle is CollisionObject3D and target.vehicle != soldier.vehicle:
+		ex.append((target.vehicle as CollisionObject3D).get_rid())
 	q.exclude = ex
 	var hit := space.intersect_ray(q)
 	if not hit.is_empty():

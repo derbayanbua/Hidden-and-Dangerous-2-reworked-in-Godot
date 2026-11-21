@@ -2131,6 +2131,10 @@ func _physics_process(delta: float) -> void:
 		# B-022: Zustand geht nur an den Server; er prüft und gibt ihn als _bst an die übrigen weiter
 		if multiplayer.is_server():
 			_bst.rpc(my_id(), me.global_position, me.velocity, me.look_yaw, me.look_pitch, me.stance, me.current_slot, me.aiming)
+		elif _sim_lag_s() > 0.0:
+			var a := [me.global_position, me.velocity, me.look_yaw, me.look_pitch, me.stance, me.current_slot, me.aiming]
+			get_tree().create_timer(_sim_lag_s(), true, true).timeout.connect(func():
+				if is_online: _st.rpc_id(1, a[0], a[1], a[2], a[3], a[4], a[5], a[6]))
 		else:
 			_st.rpc_id(1, me.global_position, me.velocity, me.look_yaw, me.look_pitch, me.stance, me.current_slot, me.aiming)
 		# Fahrzeug: Sitzwechsel/Ein-/Aussteigen melden, als Fahrer die Fahrzeuglage
@@ -2144,6 +2148,7 @@ func _physics_process(delta: float) -> void:
 				_seat.rpc_id(1, vpath, me.seat_index)
 		_sync_vehicle(me)
 	if multiplayer.is_server():
+		_record_pos_hist()           # 0.11.9 Verzugsausgleich
 		_server_tick(delta)
 		_bot_sync(delta)
 
@@ -2193,8 +2198,24 @@ func _local_action(kind: String, a: Vector3, b: Vector3, wid: String) -> void:
 	# B-022: Clients melden Aktionen nur dem Server; der Server-Spieler gibt sie direkt als _bact weiter
 	if multiplayer.is_server():
 		_bact.rpc(my_id(), kind, a, b, wid)
+	elif _sim_lag_s(false) > 0.0:
+		get_tree().create_timer(_sim_lag_s(false), true, true).timeout.connect(func():
+			if is_online: _act.rpc_id(1, kind, a, b, wid))
 	else:
 		_act.rpc_id(1, kind, a, b, wid)
+
+
+## 0.11.9 Tests: künstlicher Verzug je Richtung (Hälfte von --net_lag_ms, + Zufall bis --net_jitter_ms) für Zustand/Aktionen
+## des Clients; nur Debug-Builds (im Release wirkungslos). Der Server erfährt den Ping im Test über ping_override.
+func _sim_lag_s(jitter := true) -> float:
+	if not OS.is_debug_build() or multiplayer.is_server():
+		return 0.0
+	var ms := float(Game.cli.get("net_lag_ms", "0")) * 0.5
+	if ms <= 0.0:
+		return 0.0
+	if jitter:
+		ms += randf() * float(Game.cli.get("net_jitter_ms", "0"))
+	return ms / 1000.0
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -2645,6 +2666,71 @@ const FIRE_RATE_SLACK := 1.5       ## Kadenz × Faktor
 const FIRE_BURST := 4.0            ## gebündelt ankommende Schüsse (Lag)
 const AMMO_SLACK := 3              ## Schüsse über den Serverstand hinaus (Nachladen/Aufnahme im Flug)
 var move_check := true             ## Tests, die Figuren direkt versetzen (test_support_strike): Bewegungsprüfung aus
+
+## 0.11.9 Verzugsausgleich (Lag-Kompensation) [D]: Der Schütze sieht fremde Figuren um seinen Ping (Umlaufzeit) plus die
+## Darstellungsverzögerung der Netzfigur (Glättung 12/s ≈ 83 ms + halber Sendeabstand) zu spät. Der Server wertet einen
+## Schuss deshalb gegen die Lage aus, die der Schütze gesehen hat: Ballistics verschiebt den Strahl je Figur um
+## (Lage jetzt − Lage vor rewind_ms) aus dem Lageverlauf des Servers. Begrenzt auf LAGCOMP_MAX_MS; Schüsse von Bots und vom
+## Host-Spieler (sehen die Serverfiguren selbst) werden nicht zurückgerechnet. Schalter `--lagcomp=0` (Tests/Vergleich).
+## 0.11.9 lag compensation [D]: the server evaluates a shot against the target position the shooter actually saw
+## (shooter RTT + puppet display delay), capped at LAGCOMP_MAX_MS; shots of bots and of the host player are not rewound.
+const LAGCOMP_VIEW_MS := 100       ## Darstellungsverzögerung der Netzfigur beim Schützen (Glättung + halber Sendeabstand)
+const LAGCOMP_MAX_MS := 350        ## Obergrenze (Ping + Darstellung); darüber gilt die Obergrenze
+const LAGCOMP_KEEP_MS := 600       ## Lageverlauf je Figur
+var _pos_hist := {}                ## instance_id -> Array [[ms, Vector3], …] (nur Server, jeder Physikschritt)
+
+
+## Server: Lageverlauf aller lebenden Figuren mitschreiben (Spieler, Bots, Coop-KI)
+func _record_pos_hist() -> void:
+	var now := Time.get_ticks_msec()
+	var seen := {}
+	for g in ["team_%d" % Soldier.TEAM_ALLIED, "team_%d" % Soldier.TEAM_AXIS]:
+		for n in get_tree().get_nodes_in_group(g):
+			var s := n as Soldier
+			if s == null or not s.alive:
+				continue
+			var key := s.get_instance_id()
+			seen[key] = true
+			var h: Array = _pos_hist.get(key, [])
+			h.append([now, s.global_position])
+			while h.size() > 2 and now - int(h[0][0]) > LAGCOMP_KEEP_MS:
+				h.pop_front()
+			_pos_hist[key] = h
+	for k in _pos_hist.keys():
+		if not seen.has(k):
+			_pos_hist.erase(k)
+
+
+## Server: Ausgleichszeit (ms) für einen Schuss dieses Schützen; 0 = keiner (Bots, offline, Client, abgeschaltet)
+func shot_rewind_ms(shooter: Node) -> int:
+	if not is_online or not multiplayer.is_server() or not (shooter is Soldier):
+		return 0
+	if String(Game.cli.get("lagcomp", "1")) == "0":
+		return 0
+	var id = _soldiers.find_key(shooter)
+	# Bots und der Host-Spieler sehen die Figuren des Servers selbst (gleiche Knoten) → kein Ausgleich
+	if id == null or int(id) < 0 or int(id) == my_id():
+		return 0
+	return clampi(peer_ping(int(id)) + LAGCOMP_VIEW_MS, 0, LAGCOMP_MAX_MS)
+
+
+## Server: Versatz (Lage jetzt − Lage vor ago_ms) einer Figur aus dem Lageverlauf
+func past_offset(s: Node3D, ago_ms: int) -> Vector3:
+	var h: Array = _pos_hist.get(s.get_instance_id(), [])
+	if h.size() < 2 or ago_ms <= 0:
+		return Vector3.ZERO
+	var t := Time.get_ticks_msec() - ago_ms
+	var past: Vector3 = h[0][1]
+	for i in range(h.size() - 1, -1, -1):
+		if int(h[i][0]) <= t:
+			if i + 1 < h.size():
+				var t0 := int(h[i][0])
+				var t1 := int(h[i + 1][0])
+				past = (h[i][1] as Vector3).lerp(h[i + 1][1], clampf(float(t - t0) / maxf(float(t1 - t0), 1.0), 0.0, 1.0))
+			else:
+				past = h[i][1]
+			break
+	return s.global_position - past
 var seat_fixes := 0               ## Client: vom Server zurückgesetzte Sitzwünsche (Tests)
 var pos_fixes := 0                 ## Client: vom Server zurückgesetzte Bewegungen (Tests)
 var rejects: Array = []            ## Server: verworfene RPCs [{peer, kind, why}] (Tests, Protokoll)
@@ -5276,6 +5362,14 @@ func _bot_sync(delta: float) -> void:
 
 @rpc("authority", "call_remote", "unreliable_ordered")
 func _bst(id: int, pos: Vector3, vel: Vector3, yaw: float, pitch: float, stance: int, slot: int, aiming: bool) -> void:
+	if _sim_lag_s() > 0.0:           # 0.11.9 Tests: Verzug Server → Client
+		get_tree().create_timer(_sim_lag_s(), true, true).timeout.connect(func():
+			_bst_apply(id, pos, vel, yaw, pitch, stance, slot, aiming))
+		return
+	_bst_apply(id, pos, vel, yaw, pitch, stance, slot, aiming)
+
+
+func _bst_apply(id: int, pos: Vector3, vel: Vector3, yaw: float, pitch: float, stance: int, slot: int, aiming: bool) -> void:
 	var s: Soldier = _soldiers.get(id)
 	if not is_instance_valid(s) or not s.alive or id == my_id():
 		return

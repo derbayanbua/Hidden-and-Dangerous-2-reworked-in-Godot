@@ -31,6 +31,9 @@ class Projectile:
 	## Waffe vtable+0x24 0x7D4FD0 → 0x451100 → 0x450D30 → 0x44B030/0x4482A0). Im Flugschritt 0x44B910 wird bei gesetztem
 	## Byte jeder Treffer auf einen Akteur (Mensch, Fahrzeug, Skriptobjekt) übersprungen; nur Weltgeometrie stoppt es.
 	var pass_actors := false
+	## 0.11.9 Verzugsausgleich (nur Server, Net.shot_rewind_ms): Figuren werden für dieses Geschoss in der Lage vor
+	## rewind_ms ms geprüft (Sicht des Schützen); 0 = aus
+	var rewind_ms := 0
 
 var _projectiles: Array[Projectile] = []
 ## Einschlag eines Geschosses (Welt oder Trefferzone): Punkt, Kollider, Schütze (Tests: test_aim_ballistics)
@@ -67,6 +70,7 @@ func fire(shooter: Node, origin: Vector3, direction: Vector3, data: WeaponData, 
 	p.world = (shooter as Node3D).get_world_3d()
 	p.pass_actors = shooter != null and bool(shooter.get_meta("illfire_shots", false)) \
 		and String(Game.cli.get("illfire_pass", "1")) != "0"
+	p.rewind_ms = Net.shot_rewind_ms(shooter) if Net.is_online else 0
 	_projectiles.append(p)
 	shots_fired += 1
 
@@ -265,6 +269,70 @@ func _is_actor_hit(collider: Object) -> bool:
 	return false
 
 
+## 0.11.9 Verzugsausgleich (Server): Figuren, die sich in den letzten rewind_ms bewegt haben, werden in ihrer damaligen
+## Lage geprüft – der Strahl wird je Figur um (Lage jetzt − Lage damals) verschoben und nur gegen ihre Trefferzonen
+## gelegt; in der aktuellen Lage zählen sie nicht. Frühester Treffer entlang des Segments gewinnt. Figuren in Fahrzeug/
+## Stellung und der Schütze selbst bleiben unverändert. hit["seg_pos"] = Trefferpunkt auf dem echten Segment.
+func _lagcomp_hit(p: Projectile, space: PhysicsDirectSpaceState3D, next: Vector3, hit: Dictionary) -> Dictionary:
+	var seg := next - p.pos
+	var seg_len := seg.length()
+	if seg_len < 1e-5:
+		return hit
+	var moved := {}
+	for g in ["team_%d" % Soldier.TEAM_ALLIED, "team_%d" % Soldier.TEAM_AXIS]:
+		for n in get_tree().get_nodes_in_group(g):
+			var s := n as Soldier
+			if s == null or not s.alive or s == p.shooter or s.vehicle != null or is_instance_valid(s.mounted):
+				continue
+			var off: Vector3 = Net.past_offset(s, p.rewind_ms)
+			if off.length() < 0.02:
+				continue
+			# nur Figuren nahe am Segment (damalige Lage)
+			var c := s.global_position - off + Vector3.UP
+			var tt := clampf((c - p.pos).dot(seg) / (seg_len * seg_len), 0.0, 1.0)
+			if (p.pos + seg * tt).distance_to(c) > 3.0:
+				continue
+			moved[s] = off
+	if moved.is_empty():
+		return hit
+	var ex: Array[RID] = p.exclude.duplicate()
+	for s in moved:
+		ex.append_array((s as Soldier).exclude_rids())
+	var q := PhysicsRayQueryParameters3D.create(p.pos, next, MASK, ex)
+	q.collide_with_areas = true
+	q.collide_with_bodies = true
+	var best := space.intersect_ray(q)
+	var guard := 0
+	while not best.is_empty() and best.collider is Hitbox and p.shooter != null and (best.collider as Hitbox).soldier == p.shooter and guard < 8:
+		guard += 1
+		ex.append((best.collider as Hitbox).get_rid())
+		q.exclude = ex
+		best = space.intersect_ray(q)
+	var best_d := p.pos.distance_to(best.position) if not best.is_empty() else INF
+	for s in moved:
+		var off: Vector3 = moved[s]
+		var ex2: Array[RID] = p.exclude.duplicate()
+		var q2 := PhysicsRayQueryParameters3D.create(p.pos + off, next + off, Hitbox.LAYER, ex2)
+		q2.collide_with_areas = true
+		q2.collide_with_bodies = false
+		for i in 12:
+			var h := space.intersect_ray(q2)
+			if h.is_empty():
+				break
+			if h.collider is Hitbox and (h.collider as Hitbox).soldier == s:
+				var d := p.pos.distance_to(h.position - off)
+				if d < best_d:
+					best_d = d
+					h["seg_pos"] = h.position - off
+					best = h
+				break
+			if not (h.collider is CollisionObject3D):
+				break
+			ex2.append((h.collider as CollisionObject3D).get_rid())
+			q2.exclude = ex2
+	return best
+
+
 ## Gibt true zurück, solange das Projektil weiterfliegt.
 func _step(p: Projectile, delta: float) -> bool:
 	p.age += delta
@@ -299,12 +367,14 @@ func _step(p: Projectile, delta: float) -> bool:
 		p.exclude.append(rid)
 		q.exclude = p.exclude
 		hit = space.intersect_ray(q)
+	if p.rewind_ms > 0 and not p.pass_actors:
+		hit = _lagcomp_hit(p, space, next, hit)
 	_whizz(p, next)
 	if hit.is_empty():
 		p.travelled += p.pos.distance_to(next)
 		p.pos = next
 		return true
-	p.travelled += p.pos.distance_to(hit.position)
+	p.travelled += p.pos.distance_to(hit.get("seg_pos", hit.position))
 	projectile_impact.emit(hit.position, hit.collider, p.shooter)
 	# Original (hd2.exe 0x44B3B0): linearer Abfall nach Flugstrecke; eigene Waffen ohne Originalwert: Restenergie
 	var base := p.damage

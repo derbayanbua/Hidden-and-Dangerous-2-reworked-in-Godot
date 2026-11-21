@@ -853,11 +853,11 @@ func call_api(vm: LsVM, fname: String, args: Array):
 				b10.calm_down()
 			return null
 		"HUMAN_KILL", "HUMAN_KILLEX":
-			var b11 := _brain(vm)
+			# 0.11.9 [B] (docs/GAP_REA_2026-10-31.md §D): HUMAN_Kill(Ex) ist KEIN Angriffsauftrag, sondern tötet den Menschen
+			# sofort (vtable+0xD4, Todesart 4 bzw. 0xE). Vorher rief ein Menschenskript script_attack auf – AFRICA2
+			# AF2_mrtvola.scr (HUMAN_Kill(me), Leichen AF2_m01–m05) stand dann als lebender Gegner herum.
 			var victim := _frame_arg(vm, args[0]) as Soldier
-			if b11 and victim:
-				b11.script_attack(victim)
-			elif victim and victim.alive and (not (vm.me is Soldier) or victim == vm.me):
+			if victim and victim.alive:
 				# B-036b: Skripttod – alten Schützen nicht stehen lassen (a3 r_ar3_kill_player.scr tötete sas_7, Bericht nannte
 				# fälschlich den letzten Kameraden-Treffer „durch sas_2“ als Ursache)
 				victim.last_attacker = null

@@ -1211,7 +1211,13 @@ func _fire_shot(w: Weapon) -> void:
 		spread_deg = 0.0
 	dir = _apply_spread(dir, spread_deg)
 	if is_player_controlled and not veh_gun and not is_instance_valid(mounted):
-		dir = apply_orig_recoil(dir, w)     # 0.11.2 nur Spieler-Controller (KI-Grundwert 0) [B]
+		# 0.11.9 [B]: Rückstoß 0x5454D0 wirkt NACH dem Abfeuern auf die Blickrichtung des Menschen (Aufruf in 0x5433B0 bei
+		# 0x543DA3 mit ESI+0x10; der Schuss geht vorher bei 0x543D85 mit der gestreuten Richtung ESP+0x30 hinaus) – nicht
+		# auf das Geschoss. Vorher lenkte er jede Kugel ab (Zielfernrohr bis ~2° → MP-Scharfschütze traf ab 50 m kaum).
+		if String(Game.cli.get("recoil_bullet", "0")) == "1":
+			dir = apply_orig_recoil(dir, w)
+		else:
+			_kick_view_orig_recoil(w)
 	elif aim_dir_hook.is_valid() and not veh_gun and not is_instance_valid(mounted):
 		dir = aim_dir_hook.call(dir, w)     # 0.11.7 KI-Zielfehler 0x5722B0 (AIBrain, nur Originalmissionen offline) [B]
 	if team == TEAM_ALLIED and _CF.active(_CF.keep_mag) and w.data.slot != WeaponData.Slot.GRENADE:
@@ -1702,6 +1708,18 @@ func apply_orig_recoil(dir: Vector3, w: Weapon, rng: RandomNumberGenerator = nul
 	var c := rng.randf() if rng else randf()
 	var d := dir + Vector3((a - 0.5) * k, b * k, (c - 0.5) * k)
 	return d.normalized() if d.length_squared() > 1e-8 else dir
+
+
+## 0.11.9 [B] Rückstoß 0x5454D0 auf die Blickrichtung nach dem Schuss (Mensch +0x10): Blick wird um die Original-Ablenkung
+## versetzt; die nächste Kugel geht dorthin, wohin der Spieler danach zielt. `--recoil_bullet=1` = alter Stand (Kugel abgelenkt).
+func _kick_view_orig_recoil(w: Weapon) -> void:
+	if orig_recoil_strength(w) <= 0.0:
+		return
+	var cp := cos(look_pitch)
+	var d0 := Vector3(-sin(look_yaw) * cp, sin(look_pitch), -cos(look_yaw) * cp)
+	var k := apply_orig_recoil(d0, w)
+	look_yaw += wrapf(atan2(-k.x, -k.z) - atan2(-d0.x, -d0.z), -PI, PI)
+	look_pitch = clampf(look_pitch + asin(clampf(k.y, -1.0, 1.0)) - asin(clampf(d0.y, -1.0, 1.0)), -1.5, 1.5)
 
 
 ## Vom Controller abgeholter Rückstoß (Grad), danach zurückgesetzt.
