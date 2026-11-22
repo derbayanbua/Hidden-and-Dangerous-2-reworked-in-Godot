@@ -280,7 +280,7 @@ func _turret_of(seat: Node3D) -> Dictionary:
 static func rig_axis(pivot: Node3D, barrel: Node3D, muzzle: Node3D) -> Vector3:
 	if pivot == null:
 		return Vector3.FORWARD
-	if muzzle:
+	if muzzle and String(Game.cli.get("rig_axis", "1")) != "0":    # --rig_axis=0: Achse wie vor 0.11.9 (Vergleich)
 		var ref: Node3D = barrel if barrel and _rel_xform(muzzle, barrel) != null else pivot
 		var mt = _rel_xform(muzzle, ref)
 		var rt = _rel_xform(ref, pivot) if ref != pivot else Transform3D()

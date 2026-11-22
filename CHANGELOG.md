@@ -2,6 +2,69 @@
 
 
 
+## 0.12.1 (22.11.2026)
+
+**DE**
+- **Rückstoß wie im Original:** Der Blick springt je Schuss einmal um die Original-Ablenkung (nach oben, leicht seitlich)
+  und bleibt dort – keine Rückführung. Der zusätzliche, frei geschätzte Blickstoß entfällt für Hand- und Schulterwaffen.
+- **Feste Waffenstellungen:** MG- und Flakstellungen richten das Rohr jetzt nach der Mündung aus (wie Bordwaffen seit
+  0.11.9), die Höhengrenzen gelten ab der Ruhelage des Rohrs. KI-Schützen mit kurzem Feuerbefehl (NORMANDY-Flak) feuern
+  jetzt mindestens einen Schuss statt gar keinen. Der Panzertest misst den Seitenschwenk der Bordwaffe jetzt gegen die
+  Ruhelage zur Wanne (wie die Original-Grenze).
+- **Treppen im Laufnetz der KI:** Die Leuchtturm-Wendeltreppe (NORMANDY, NORMANDY_MP) ist jetzt ans Navigationsnetz
+  angebunden – Karten mit Wendeltreppen werden mit Layer-Aufteilung gebacken, weil die bisherige Aufteilung eine
+  Wendel als sich selbst überdeckende Fläche anlegte. Der steile Kirchturmaufgang in CZECH4/CZECH5 ist mit einer
+  Ersatzrampe begehbar. CZECH3: Die Treppenuntersicht gilt nicht mehr als Ersatzrampe, Soldaten laufen wieder auf den
+  Tritten. Nach unten gewickelte Original-Kollisionsböden kommen ins Laufnetz (NORMANDY2_MP_ZONE-Obergeschosse,
+  CZECH2_MP_ZONE jetzt 166 statt 109 von 170 Punkten erreichbar) – nur auf diesen beiden Karten, damit Decken und
+  Überhänge anderer Karten nicht begehbar werden. ARCTIC2 ohne Navmesh-Kantenfehler.
+- **Gegner frieren im Kampf nicht mehr ein:** Wer sein Ziel verloren hat und es wieder sieht (auch auf dem Rückweg zum
+  Posten oder in der Ruhephase), nimmt das Gefecht sofort neu auf, statt bis zu 25 s geduckt stehen zu bleiben – wie der
+  Kopf des Original-Kampfautomaten. Ohne Sichtkontakt bleibt die Original-Wartezeit.
+- **Funkgerät für Artillerie/Luftangriff (Mehrspieler):** Das Funkgerät liegt jetzt auf zu Fuß erreichbarem Boden statt
+  auf Dächern über der Original-Funkstelle, steht mit dem Modell sichtbar auf dem Boden und lässt sich per Benutzen
+  aufnehmen. Auf Karten mit unsichtbarer Kartengrenze (Arena-Karten) und auf Zonenkarten erscheint es jetzt überhaupt;
+  der Server meldet bei Kartenstart, wann es abgeworfen wird bzw. dass die Karte keine Unterstützung zulässt.
+- **Test AFRICA1-Verteidiger:** Ein Verteidiger, der nach dem Alarm laut Originalskript zu seinem Alarmposten läuft, gilt
+  jetzt auch im Dauerfeuer-Test als alarmiert (wie bereits im Alarmtest).
+- **Mehrspieler-Tests stabiler:** Fallschadentest ohne Aufwärmphase (deren Ende stellte den Client mitten im Sturz neu
+  auf). Funkgerättest: Client prüft die Erreichbarkeit erst nach fertigem Laufnetz, die Zielvorschau wird an der
+  tatsächlichen Kamerablickrichtung ausgerichtet und bei verdeckter Sicht ein anderer Standort gewählt.
+- **Werkzeuge für Linux:** `tools/user/hd2_menu.sh` – das Werkzeugmenü (Original-Installation suchen/prüfen, Spieldaten
+  exportieren, Filme, Hochskalieren, Status, Starten) jetzt auch für Linux, Aufruf `bash tools/user/hd2_menu.sh`.
+  Nutzt System-Python 3.10–3.14 in einer eigenen venv und das System-ffmpeg. Die Konverter finden Original-Archive
+  unabhängig von Groß-/Kleinschreibung.
+
+**EN**
+- **Recoil as in the original:** Each shot kicks the view once by the original offset (upwards, slightly sideways) and it
+  stays there – no recovery. The additional, estimated view kick is gone for hand-held and shoulder weapons.
+- **Fixed gun emplacements:** MG and flak emplacements now aim the barrel along the muzzle axis (as mounted vehicle guns
+  since 0.11.9); elevation limits count from the barrel's rest position. AI gunners with a short fire order (NORMANDY
+  flak) now fire at least one shot instead of none. The tank test now measures the mounted gun's traverse against its rest
+  position relative to the hull (like the original limit).
+- **Stairs in the AI walk mesh:** The lighthouse spiral staircase (NORMANDY, NORMANDY_MP) is now connected to the
+  navigation mesh – maps with spiral stairs are baked with layer partitioning, because the previous partitioning
+  produced a self-overlapping region for the spiral. The steep church tower stairs in CZECH4/CZECH5 are walkable via a
+  substitute ramp. CZECH3: the stair soffit no longer counts as a substitute ramp, soldiers walk on the treads again.
+  Downward-wound original collision floors now enter the walk mesh (NORMANDY2_MP_ZONE upper floors, CZECH2_MP_ZONE now
+  166 instead of 109 of 170 points reachable) – only on these two maps, so ceilings and overhangs of other maps do not
+  become walkable. ARCTIC2 without navmesh edge errors.
+- **Enemies no longer freeze in combat:** An enemy who lost his target and sees it again (also on the way back to his
+  post or while resting) resumes the fight at once instead of crouching in place for up to 25 s – like the head of the
+  original combat state machine. Without line of sight the original waiting time remains.
+- **Radio for artillery/air strike (multiplayer):** The radio now lies on ground reachable on foot instead of on roofs above
+  the original radio spot, its model sits visibly on the ground and it can be picked up with Use. It now appears at all on
+  maps with an invisible map border (arena maps) and on zone maps; at map start the server announces when it will be
+  dropped or that the map does not allow support.
+- **AFRICA1 defender test:** A defender who, per the original script, runs to his alarm post after the alarm now also
+  counts as alarmed in the sustained-fire test (as already in the alarm test).
+- **More stable multiplayer tests:** Fall damage test without warm-up (its end respawned the client mid-fall). Radio test:
+  the client checks reachability only once its walk mesh is ready, aims the target preview along the actual camera
+  direction and picks another spot if the view is blocked.
+- **Tools for Linux:** `tools/user/hd2_menu.sh` – the tools menu (find/check the original installation, export game data,
+  movies, upscaling, status, launch) now also for Linux, run with `bash tools/user/hd2_menu.sh`. Uses system Python
+  3.10–3.14 in a private venv and the system ffmpeg. The converters find original archives regardless of letter case.
+
 ## 0.11.9 (21.11.2026)
 
 **DE**

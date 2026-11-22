@@ -75,6 +75,7 @@ static func make_key(m: Node, nm: NavigationMesh, src: NavigationMeshSourceGeome
 		parts.append(_code_md5(p))
 	# Optionen
 	parts.append("detail:%s|%s" % [nm.detail_sample_distance, nm.detail_sample_max_error])
+	parts.append("part:%d" % nm.sample_partition_type)    # 0.12.1: Layer-Partition für Wendeltreppen-Karten
 	for opt in ["no_nav_bridges", "nav_slope", "nav_tiles", "nav_auto_stairs_off", "nav_foot_snap"]:
 		parts.append("%s=%s" % [opt, str(Game.cli.get(opt, "<none>"))])
 	parts.append("plan:" + plan)

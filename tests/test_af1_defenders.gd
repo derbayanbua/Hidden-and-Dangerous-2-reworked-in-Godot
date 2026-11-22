@@ -51,7 +51,10 @@ func _run() -> void:
 			Events.emit_noise(src, 120.0, c, c.team, &"gunshot")
 			await seconds(0.3)
 			states[defender.state_name()] = true
-		check(defender.state == EnemyBrain.State.SEARCH, "Dauerfeuer: Verteidiger bleibt alarmiert (Suche)", str(states))
+		# 0.12.1: OnAlarm-Skriptweg (af1_16.scr HUMAN_Move("AF1_16_alarm")) beendet die Suche und läuft in „Wache“ –
+		# gilt wie in test_alarm_orig als alarmiert (docs/status/alarm_skriptweg.md, script_move_active)
+		check(defender.state == EnemyBrain.State.SEARCH or defender.script_move_active(),
+				"Dauerfeuer: Verteidiger bleibt alarmiert (Suche)", str(states) + (" Skriptweg" if defender.script_move_active() else ""))
 		check(not states.has("Untersucht"), "kein Herabstufen auf Untersucht", str(states))
 		check(defender.last_alarm_type == EnemyBrain.AL_SHOT or defender.last_alarm_type == EnemyBrain.AL_NEAR_SHOT \
 			or not defender.script_alarm_enabled or (defender.alarm_mask & EnemyBrain.AL_SHOT) == 0,

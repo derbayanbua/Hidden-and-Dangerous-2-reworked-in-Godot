@@ -90,10 +90,23 @@ func setup(m: Node) -> void:
 
 # --- Karte ----------------------------------------------------------------------------------------------
 
+## Spawnpunkte + Spawnplätze/Mitten der Besetzungszonen (0.12.1: Zonenkarten wie NORMANDY2_MP_ZONE haben oft nur
+## einen freien Spawnpunkt → Ausdehnung 0 → Karte galt als „eng“, Funkgerät nie)
 func _spawns() -> Array:
+	var out: Array = []
 	if mission and mission.has_method("mp_spawns"):
-		return mission.mp_spawns()
-	return []
+		out = (mission.mp_spawns() as Array).duplicate()
+	if mission and mission.has_method("mp_zones"):
+		for z in mission.mp_zones():
+			if not (z is Dictionary):
+				continue
+			for s in (z as Dictionary).get("slots", []):
+				if s is Dictionary and (s as Dictionary).has("pos"):
+					out.append(s)
+			var xf = (z as Dictionary).get("xf")
+			if xf is Transform3D:
+				out.append({"pos": (xf as Transform3D).origin})
+	return out
 
 
 func _map_center() -> Vector3:
@@ -163,24 +176,71 @@ func _ray(a: Vector3, b: Vector3) -> Dictionary:
 	return sp.intersect_ray(PhysicsRayQueryParameters3D.create(a, b, 1))
 
 
+## 0.12.1: Unsichtbare Kartengrenzen der Original-Karten (Ordner „BORDER“, u. a. Deckel über der Karte, ARCTIC1 bei
+## y ≈ 22 m) zählen nicht als Dach – sonst galt auf diesen Karten nirgends „freier Himmel“ (Arena-Karten: Funkgerät nie).
 func sky_open(p: Vector3) -> bool:
-	return _ray(p + Vector3.UP * 0.6, p + Vector3.UP * SKY_CLEAR).is_empty()
+	return _ray_open(p + Vector3.UP * 0.6, p + Vector3.UP * SKY_CLEAR)
 
 
-## Begehbarer Boden mit freiem Himmel nahe p (Spirale bis 60 m), INF wenn keiner
-func _find_ground(p: Vector3) -> Vector3:
+static func is_border(c) -> bool:
+	return c is Node and String((c as Node).get_path()).contains("/BORDER/")
+
+
+func _ray_open(a: Vector3, b: Vector3) -> bool:
+	var sp := _space()
+	if sp == null:
+		return true
+	var q := PhysicsRayQueryParameters3D.create(a, b, 1)
+	var ex: Array[RID] = []
+	for _i in 6:
+		q.exclude = ex
+		var hit := sp.intersect_ray(q)
+		if hit.is_empty():
+			return true
+		if not is_border(hit.get("collider")):
+			return false
+		ex.append(hit["rid"])
+	return false
+
+
+## Begehbarer Boden mit freiem Himmel nahe p (Spirale bis 60 m), INF wenn keiner.
+## 0.12.1: Je Spalte alle Flächen von oben nach unten (nicht nur die oberste – Dächer, Baumkronen, Felsen), und mit
+## fertigem Navigationsnetz nur Stellen, die von einem Spawnpunkt zu Fuß erreichbar sind (Original-Funkstellen liegen
+## oft in Gebäuden; vorher landete das Funkgerät dann auf dem Dach darüber).
+func _find_ground(p: Vector3, walk := true) -> Vector3:
 	for r in [0.0, 4.0, 8.0, 12.0, 18.0, 25.0, 35.0, 45.0, 60.0]:
 		var n: int = 1 if r == 0.0 else 8
 		for i in n:
 			var a := TAU * float(i) / float(n)
 			var q := p + Vector3(cos(a), 0.0, sin(a)) * float(r)
-			var hit := _ray(q + Vector3.UP * 150.0, q + Vector3.DOWN * 300.0)
-			if hit.is_empty():
-				continue
-			var g: Vector3 = hit["position"]
-			if (hit["normal"] as Vector3).y > 0.7 and sky_open(g):
-				return g
+			var top := q.y + 150.0
+			for _layer in 6:
+				var hit := _ray(Vector3(q.x, top, q.z), Vector3(q.x, q.y - 300.0, q.z))
+				if hit.is_empty():
+					break
+				var g: Vector3 = hit["position"]
+				top = g.y - 0.05
+				if not is_border(hit.get("collider")) and (hit["normal"] as Vector3).y > 0.7 and sky_open(g) and (not walk or walkable(g)):
+					return g
 	return Vector3.INF
+
+
+## Zu Fuß erreichbar: nahe am Navigationsnetz und Pfad vom ersten Spawnpunkt endet dort (ohne Netz: ja)
+func walkable(g: Vector3) -> bool:
+	if mission == null or not bool(mission.get("nav_ready")) or not is_inside_tree():
+		return true
+	var map := get_world_3d().navigation_map
+	var c := NavigationServer3D.map_get_closest_point(map, g)
+	if Vector2(c.x - g.x, c.z - g.z).length() > 0.8 or absf(c.y - g.y) > 0.8:
+		return false
+	var pts := _spawns()
+	if pts.is_empty():
+		return true
+	for sp in pts.slice(0, 3):
+		var path := AIBrain.nav_path(map, NavigationServer3D.map_get_closest_point(map, sp["pos"]), c)   # ohne 4096-Grenze
+		if path.size() > 0 and path[path.size() - 1].distance_to(c) < 1.5:
+			return true
+	return false
 
 
 func interval_s() -> float:
@@ -211,6 +271,12 @@ func _physics_process(delta: float) -> void:
 		if _detect_t <= 0.0:
 			map_open = _detect_open()
 			print("SUPPORT: Karte offen = ", map_open)
+			# 0.12.1: Rückmeldung statt stillem Ausbleiben (Regel an, aber Karte eng/überdacht bzw. Wartezeit)
+			if Net.is_online and multiplayer.is_server() and int(Net.rule("support_strike")) > 0:
+				if map_open:
+					Net._announce("Funk-Unterstützung: Funkgerät wird in %d min abgeworfen." % maxi(1, ceili(interval_s() / 60.0)))
+				else:
+					Net._announce("Funk-Unterstützung auf dieser Karte nicht verfügbar (kein offenes Gelände).")
 	_update_view()
 	if not Net.is_online or not multiplayer.is_server():
 		return
@@ -239,8 +305,8 @@ func _physics_process(delta: float) -> void:
 					break
 	elif strikes.is_empty() and Net.game_state == Net.State.RUNNING and not Net.match_over:
 		spawn_t -= delta
-		if spawn_t <= 0.0:
-			server_spawn()
+		if spawn_t <= 0.0 and (mission == null or mission.get("nav_ready") != false):
+			server_spawn()     # erst mit Navigationsnetz: Erreichbarkeit der Stelle prüfbar
 
 
 func server_spawn() -> bool:
@@ -253,6 +319,8 @@ func server_spawn() -> bool:
 	var g := _find_ground(base)
 	if not g.is_finite():
 		g = _find_ground(center)
+	if not g.is_finite():
+		g = _find_ground(base, false)      # Rückfall (Netz-Pfadsuche begrenzt): wie bisher oberste freie Fläche
 	if not g.is_finite():
 		spawn_t = 10.0
 		return false
@@ -339,7 +407,7 @@ func _server_wave(st: Dictionary) -> void:
 		var dist := Vector2(tp.x - pos.x, tp.z - pos.z).length()
 		if dist > r or absf(tp.y - pos.y) > r:
 			continue
-		if not _ray(tp + Vector3.UP * 0.3, tp + Vector3.UP * 25.0).is_empty():
+		if not _ray_open(tp + Vector3.UP * 0.3, tp + Vector3.UP * 25.0):
 			continue     # unter Dach / in Gebäuden geschützt
 		var dmg := WeaponDB.explosion_damage(float(WAVE_STRENGTH[kind]), r, dist)
 		if dmg > 0.0:
@@ -436,7 +504,7 @@ func _place_radio_node() -> void:
 		_radio_node = RadioItem.new()
 		_radio_node.kind = radio_kind
 		_radio_node.host = self
-		_radio_node.add_child(radio_model(radio_kind))
+		_radio_node.add_child(_grounded(radio_model(radio_kind)))
 	var parent: Node = self
 	if radio_state == 2:
 		var s: Soldier = Net._soldiers.get(carrier)
@@ -469,6 +537,37 @@ static func radio_model(kind: int) -> Node3D:
 	mi.mesh = bm
 	mi.set_meta("radio_model", "")
 	return mi
+
+
+## 0.12.1: Modell mit der Unterkante auf den Boden setzen und mittig ausrichten (Ursprung der Original-Modelle liegt
+## nicht am Fuß → schwebte bzw. steckte im Boden), eigene Kollision aus (Strahlabfragen, Stolpern)
+static func _grounded(n: Node3D) -> Node3D:
+	for c in n.find_children("*", "CollisionObject3D", true, false):
+		(c as CollisionObject3D).collision_layer = 0
+		(c as CollisionObject3D).collision_mask = 0
+	var box := _local_aabb(n, Transform3D.IDENTITY)
+	if box.size != Vector3.ZERO:
+		var holder := Node3D.new()
+		holder.name = "RadioModel"
+		n.position -= Vector3(box.get_center().x, box.position.y, box.get_center().z)
+		holder.add_child(n)
+		holder.set_meta("radio_model", n.get_meta("radio_model", ""))
+		return holder
+	return n
+
+
+static func _local_aabb(n: Node, xf: Transform3D) -> AABB:
+	var box := AABB()
+	var t := xf
+	if n is Node3D:
+		t = xf * (n as Node3D).transform
+	if n is VisualInstance3D:
+		box = t * (n as VisualInstance3D).get_aabb()
+	for c in n.get_children():
+		var b := _local_aabb(c, t)
+		if b.size != Vector3.ZERO:
+			box = b if box.size == Vector3.ZERO else box.merge(b)
+	return box
 
 
 func show_strike(kind: int, pos: Vector3, caller: int, delay: float, plane_dir: Vector3) -> void:

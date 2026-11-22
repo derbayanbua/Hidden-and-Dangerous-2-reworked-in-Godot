@@ -59,6 +59,48 @@ func _test_map(id: String) -> void:
 		print("LINKCHECK %d/%d Links begehbar" % [ok, NavigationServer3D.map_get_links(nav_map).size()])
 		for b in bad:
 			print("   ", b)
+	# B-0121: --edge_errors = Kanten, die mehr als zwei Polygone derselben Region teilen (Godot „edge error(s)“)
+	if Game.cli.has("edge_errors"):
+		for rn in get_tree().root.find_children("*", "NavigationRegion3D", true, false):
+			var nmesh := (rn as NavigationRegion3D).navigation_mesh
+			if nmesh == null:
+				continue
+			var xf := (rn as NavigationRegion3D).global_transform
+			var vs := nmesh.get_vertices()
+			var cnt := {}
+			for pi in nmesh.get_polygon_count():
+				var poly := nmesh.get_polygon(pi)
+				for k in poly.size():
+					var a3: Vector3 = xf * vs[poly[k]]
+					var b3: Vector3 = xf * vs[poly[(k + 1) % poly.size()]]
+					var ka := Vector3i((a3 / 0.05).round())
+					var kb := Vector3i((b3 / 0.05).round())
+					var key := [ka, kb] if str(ka) < str(kb) else [kb, ka]
+					var ks := str(key)
+					if not cnt.has(ks):
+						cnt[ks] = [0, a3, b3]
+					cnt[ks][0] += 1
+			for ks in cnt:
+				if cnt[ks][0] > 2:
+					print("EDGE_ERROR %s: %d Polygone an %s – %s" % [rn.name, cnt[ks][0], cnt[ks][1], cnt[ks][2]])
+	# B-0121: --paths=a;b@c;d@… = mehrere Pfade, je Zeile Ende und Abstand zum Ziel (query_path ohne Polygongrenze;
+	# „@“ statt „|“, weil run_locked.ps1 über cmd /c startet)
+	for pr in String(Game.cli.get("paths", "")).split("@", false):
+		var ab := pr.split(";")
+		var a2 := ab[0].split_floats(",")
+		var b2 := ab[1].split_floats(",")
+		var pa := Vector3(a2[0], a2[1], a2[2])
+		var pb := Vector3(b2[0], b2[1], b2[2])
+		var qp := NavigationPathQueryParameters3D.new()
+		qp.map = nav_map
+		qp.start_position = pa
+		qp.target_position = pb
+		qp.path_search_max_polygons = 0
+		var qr := NavigationPathQueryResult3D.new()
+		NavigationServer3D.query_path(qp, qr)
+		var pv := qr.path
+		var en: Vector3 = pv[pv.size() - 1] if pv.size() > 0 else pa
+		print("PATHS %s -> %s: Ende %s (Rest %.2f m, %d Punkte)" % [pa, pb, en, en.distance_to(pb), pv.size()])
 	if Game.cli.has("path"):
 		var pp := String(Game.cli["path"]).split(";")
 		var a := pp[0].split_floats(",")

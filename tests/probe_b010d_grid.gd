@@ -83,6 +83,26 @@ func _test_map(id: String) -> void:
 				for k in poly:
 					pts += " (%.1f %.2f %.1f)" % [vs[k].x, vs[k].y, vs[k].z]
 				print("POLY y %.2f..%.2f:%s" % [lo, hi, pts])
+	# B-0121: --src_dump=y0,y1 = Dreiecke der Navmesh-Quellgeometrie im Kasten mit Mittelpunkt-Höhe y0…y1
+	if Game.cli.has("src_dump"):
+		var yr := String(Game.cli["src_dump"]).split_floats(",")
+		var src := NavigationMeshSourceGeometryData3D.new()
+		NavigationServer3D.parse_source_geometry_data(m.nav_region.navigation_mesh, src, m.nav_region)
+		var sv := src.get_vertices()
+		var si := src.get_indices()
+		var cnt := 0
+		for t in range(0, si.size() - 2, 3):
+			var a := Vector3(sv[si[t] * 3], sv[si[t] * 3 + 1], sv[si[t] * 3 + 2])
+			var b := Vector3(sv[si[t + 1] * 3], sv[si[t + 1] * 3 + 1], sv[si[t + 1] * 3 + 2])
+			var c := Vector3(sv[si[t + 2] * 3], sv[si[t + 2] * 3 + 1], sv[si[t + 2] * 3 + 2])
+			var mid := (a + b + c) / 3.0
+			if mid.x < bx[0] or mid.x > bx[2] or mid.z < bx[1] or mid.z > bx[3] or mid.y < yr[0] or mid.y > yr[1]:
+				continue
+			var n := (b - a).cross(c - a)
+			cnt += 1
+			if cnt <= 60:
+				print("SRC %s %s %s n=%s" % [a, b, c, n.normalized()])
+		print("SRC Dreiecke im Kasten: %d" % cnt)
 	var st := float(Game.cli.get("step", "0.5"))
 	for ys in String(Game.cli.get("levels", "0")).split(","):
 		var y := float(ys)
@@ -105,9 +125,17 @@ func _test_map(id: String) -> void:
 					_seen[h.collider_id] = true
 					_report_winding(h)
 				if not h.is_empty() and not on:
-					var q2 := PhysicsRayQueryParameters3D.create(h.position + Vector3.UP * 0.05, h.position + Vector3.UP * 2.0, 1)
+					# B-0121: --mask=<Bits> = Kopfraum gegen dieselben Ebenen wie die Navmesh-Quelle (Standard nur Welt)
+					var q2 := PhysicsRayQueryParameters3D.create(h.position + Vector3.UP * 0.05, h.position + Vector3.UP * 2.0,
+						int(Game.cli.get("mask", "1")))
+					q2.collide_with_areas = Game.cli.has("mask")
 					q2.hit_back_faces = true
 					var h2 := space.intersect_ray(q2)
+					if Game.cli.has("mask") and not h2.is_empty() and not _seen.has(-int(h2.collider_id)):
+						_seen[-int(h2.collider_id)] = true
+						var co := h2.collider as CollisionObject3D
+						print("   DECKE %s Ebene %d bei y %.2f" % [co.get_path() if co else "?", co.collision_layer if co else 0,
+							h2.position.y])
 					if not h2.is_empty():
 						ch = str(clampi(int((h2.position.y - h.position.y) * 5.0), 0, 9))
 				row += ch

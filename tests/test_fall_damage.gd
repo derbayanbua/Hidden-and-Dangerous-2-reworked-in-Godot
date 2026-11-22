@@ -213,7 +213,7 @@ func _run_mp() -> void:
 	Net.local_name = "Host"
 	Net.move_check = false        # Testclient versetzt seine Figur direkt in die Luft – kein Spielzug
 	var ok := Net.host({"name": "Fall", "map": "mp_arena_a1_blizzard", "mode": Net.Mode.DEATHMATCH, "max_players": 4,
-		"time_limit_min": 0, "score_limit": 0, "respawn_s": 5, "password": "", "port": MP_PORT,
+		"time_limit_min": 0, "score_limit": 0, "warmup_s": 0, "respawn_s": 5, "password": "", "port": MP_PORT,
 		"friendly_fire": true, "bots_per_team": 0, "falling_damage": true, "spawn_protect_s": 0, "flood_protect": false})
 	check(Net.is_online and multiplayer.is_server(), "Server gestartet", str(ok) + " " + Net.last_error)
 	check(bool(Net.rule("falling_damage")), "Regel Fallschaden an")

@@ -1254,7 +1254,9 @@ func _fire_shot(w: Weapon) -> void:
 		k = 0.55
 	if is_instance_valid(mounted) and mounted.has_method("spread_deg"):
 		k = 0.0      # 0.11.7: MG im Lager des Bordschützenstands (AFRICA6) – kein Hochziehen der Blickrichtung [E]
-	_recoil += Vector2(w.data.recoil_pitch * k, randf_range(-1.0, 1.0) * w.data.recoil_yaw * k)
+	if orig_view_recoil_only(veh_gun):
+		k = 0.0      # 0.12.1 [B]: Original kennt nur den Sprung 0x5454D0 auf Controller+0x10, keinen zweiten Blickstoß
+	_recoil +=Vector2(w.data.recoil_pitch * k, randf_range(-1.0, 1.0) * w.data.recoil_yaw * k)
 	last_shot_time = Time.get_ticks_msec() / 1000.0
 	shot_fired.emit(w)
 	if w.data.action == WeaponData.Action.BOLT:
@@ -1720,6 +1722,17 @@ func _kick_view_orig_recoil(w: Weapon) -> void:
 	var k := apply_orig_recoil(d0, w)
 	look_yaw += wrapf(atan2(-k.x, -k.z) - atan2(-d0.x, -d0.z), -PI, PI)
 	look_pitch = clampf(look_pitch + asin(clampf(k.y, -1.0, 1.0)) - asin(clampf(d0.y, -1.0, 1.0)), -1.5, 1.5)
+
+
+## 0.12.1 [B] Zeitverlauf: 0x5454D0 addiert die Ablenkung einmal je Schuss direkt auf den Blickvektor Controller+0x10
+## (Getter vtable+0x4C = 0x584B50 `lea eax,[ecx+0x10]`), ohne Zeitglied, Interpolation oder Rückführung – der Blick
+## springt und bleibt dort (der Spieler zieht selbst nach). Der frühere Design-Blickstoß `recoil_pitch/yaw` [E] entfällt
+## daher für den Menschen mit Hand-/Schulterwaffe. Alter Stand: `--recoil_design=1` (zusätzlicher Stoß) bzw.
+## `--recoil_bullet=1` (0.11.8: Kugel abgelenkt + Design-Stoß).
+func orig_view_recoil_only(veh_gun: bool = false) -> bool:
+	if not is_player_controlled or veh_gun or is_instance_valid(mounted):
+		return false
+	return String(Game.cli.get("recoil_bullet", "0")) != "1" and String(Game.cli.get("recoil_design", "0")) != "1"
 
 
 ## Vom Controller abgeholter Rückstoß (Grad), danach zurückgesetzt.

@@ -28,8 +28,24 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dta_probe import KEYS, xor_block  # noqa: E402
 
 
+def resolve_ci(path: str) -> str:
+    """Dateiname ohne Beachtung der Groß-/Kleinschreibung auflösen (Linux: 'MODELS.DTA' vs. 'Models.dta').
+    Resolve the file name case-insensitively (case-sensitive file systems). Unverändert, wenn vorhanden/nicht gefunden."""
+    if os.path.exists(path):
+        return path
+    d, name = os.path.split(path)
+    try:
+        for n in os.listdir(d or "."):
+            if n.lower() == name.lower():
+                return os.path.join(d, n)
+    except OSError:
+        pass
+    return path
+
+
 class Archive:
     def __init__(self, path: str):
+        path = resolve_ci(path)
         self.path = path
         self.k1, self.k2 = KEYS[os.path.basename(path).lower()]
         self.f = open(path, "rb")

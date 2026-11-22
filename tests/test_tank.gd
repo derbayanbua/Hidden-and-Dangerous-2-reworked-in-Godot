@@ -232,8 +232,24 @@ func _run() -> void:
 			hale.look_yaw = my0 + 1.5
 			await get_tree().physics_frame
 		var dm1 := tank.turret_dir(mg_seat)
-		var side := absf(angle_difference(my0, atan2(-dm1.x, -dm1.z)))
-		check(absf(rad_to_deg(side) - 30.0) < 3.0, "Bug-MG schwenkt höchstens 30° zur Seite", "%.1f°" % rad_to_deg(side))
+		# 0.12.1: Seitenwinkel in der Drehebene der Lafette (Senkrechte = Hochachse des HORT-Elternrahmens), nicht in der
+		# Welt-Waagerechten – die Grenze left/right gilt relativ zur Wanne (0x4C2580). Bei geneigter Wanne bzw. leicht
+		# gekippter Rohrachse ergab die Weltprojektion 26,5° bei exakt 30° Lafettendrehung (yaw 0,524 rad).
+		var hr: Node3D = tank.turrets[mg_seat]["hort"]
+		var up_ax: Vector3 = (hr.get_parent() as Node3D).global_basis.y.normalized() if hr and hr.get_parent() is Node3D else Vector3.UP
+		# Bezug = Ruhelage zur Wanne (Lafettendrehung 0), nicht die Lage beim Einsteigen (dort stand das MG schon
+		# leicht geschwenkt: Blick des Schützen beim Einsteigen)
+		var tt: Dictionary = tank.turrets[mg_seat]
+		var yaw_keep: float = tt["yaw"]
+		tt["yaw"] = 0.0
+		tank._apply_turret(tt)
+		var rest_d := tank.turret_dir(mg_seat)
+		tt["yaw"] = yaw_keep
+		tank._apply_turret(tt)
+		var a0 := (rest_d - up_ax * rest_d.dot(up_ax)).normalized()
+		var a1 := (dm1 - up_ax * dm1.dot(up_ax)).normalized()
+		var side := a0.angle_to(a1)
+		check(absf(rad_to_deg(side) - 30.0) < 3.0, "Bug-MG schwenkt höchstens 30° zur Seite", "%.1f° (Achse %s, yaw %.3f, pitch %.3f, %s → %s)" % [rad_to_deg(side), tank.turrets[mg_seat]["axis"], tank.turrets[mg_seat]["yaw"], tank.turrets[mg_seat]["pitch"], dm0, dm1])
 		tank.leave(hale)
 
 	# --- KI besetzt MG-Stellung per Originalbefehl ---

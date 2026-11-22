@@ -310,6 +310,16 @@ func _bake_tiles(nm: NavigationMesh) -> void:
 		var ts := Time.get_ticks_msec()
 		var nr := StairFinder.add_nav_ramps(static_root, static_root, get_world_3d().direct_space_state)
 		print("NAV: %d Treppen-Rampen (Navmesh) in %d ms" % [nr, Time.get_ticks_msec() - ts])
+	# 0.12.1 (B-0121): Karten mit Wendeltreppen-Rampen (OrigLevel.HELIX_PATCHES, Meta „nav_partition_layers“) mit
+	# Layer-Partitionierung backen – Watershed legt eine Wendel als eine sich selbst überdeckende Region an, deren
+	# Triangulierung scheitert (Recast-Doku „overlaps may occur if you have narrow spiral corridors (i.e stairs)“;
+	# NORMANDY-Leuchtturm: Polygone von 5 bis 23 m Höhe, test_stairs T1 Pfad✗). `--nav_partition=0|1|2` erzwingt.
+	if static_root and String(Game.cli.get("nav_partition", "")) == "":
+		for b in static_root.get_children():
+			if b.has_meta("nav_partition_layers"):
+				nm.sample_partition_type = NavigationMesh.SAMPLE_PARTITION_LAYERS
+	elif Game.cli.has("nav_partition"):
+		nm.sample_partition_type = int(Game.cli["nav_partition"]) as NavigationMesh.SamplePartitionType
 	var src := NavigationMeshSourceGeometryData3D.new()
 	NavigationServer3D.parse_source_geometry_data(nm, src, nav_region)
 	var box := src.get_bounds()

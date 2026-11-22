@@ -24,7 +24,7 @@ def collect():
     files = {}
     for a in ["others.DTA", "patch.dta"]:   # Patch überschreibt
         p = os.path.join(cm.ORIG, a)
-        if not os.path.exists(p):
+        if not os.path.exists(cm.dta_extract.resolve_ci(p)):
             continue
         arc = cm.archive(a)
         for k, e in arc.index.items():

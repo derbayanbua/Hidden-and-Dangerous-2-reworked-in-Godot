@@ -36,7 +36,7 @@ func _run() -> void:
 	if ph in ["all", "streu"]:
 		_phase_scatter()
 	if ph in ["all", "streu", "rueck"]:
-		_phase_recoil()
+		await _phase_recoil()
 	if ph in ["streu", "rueck"]:
 		_finish()
 		return
@@ -203,6 +203,24 @@ func _phase_recoil() -> void:
 	s.is_player_controlled = false
 	check(s.orig_recoil_strength(w) == 0.0 and s.apply_orig_recoil(dir, w, rng) == dir, "R KI ohne Rückstoß (Grundwert 0)")
 	s.is_player_controlled = true
+	# 0.12.1 [B] Zeitverlauf: Sprung auf den Blick (Controller+0x10), keine Erholung, kein Zusatz-Blickstoß
+	if String(Game.cli.get("recoil_bullet", "0")) != "1" and String(Game.cli.get("recoil_design", "0")) != "1":
+		var p0 := s.look_pitch
+		var y0 := s.look_yaw
+		s.consume_recoil()
+		s._kick_view_orig_recoil(w)
+		var dp := s.look_pitch - p0
+		var dy := absf(wrapf(s.look_yaw - y0, -PI, PI))
+		var lim := asin(ra * 0.2) * 1.05 + 1e-4
+		check(dp >= -1e-6 and dp <= lim and dy <= lim, "R Blick springt sofort um ≤ R·0,2 (hoch)",
+			"Δpitch %.5f Δyaw %.5f (max %.5f)" % [dp, dy, lim])
+		var p1 := s.look_pitch
+		await seconds(0.5)
+		check(absf(s.look_pitch - p1) < 1e-6, "R keine Rückführung des Blicks (0,5 s)", "%.6f" % (s.look_pitch - p1))
+		check(s.orig_view_recoil_only() and s.consume_recoil() == Vector2.ZERO, "R kein zusätzlicher Design-Blickstoß")
+		s.look_pitch = p0
+		s.look_yaw = y0
+		s.aiming = true                    # Steuerung kann den Anschlag während der Wartezeit zurücksetzen
 	# Zielgenauigkeit 0x5A8100 = Grundwert + dw15·0,01
 	var acc := s.orig_accuracy()
 	check(absf(acc - (0.25 + tan(deg_to_rad(w.data.spread_aim)))) < 1e-4, "R Zielgenauigkeit = Grundwert + dw15·0,01",

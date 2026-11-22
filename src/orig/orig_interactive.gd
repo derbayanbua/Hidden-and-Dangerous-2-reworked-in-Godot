@@ -1661,6 +1661,12 @@ class OrigEmplacement extends Interactable:
 	var lim := {"up": 30.0, "down": 30.0, "left": 60.0, "right": 60.0}
 	var aim_yaw := 0.0              ## aktuelle Rohrdrehung relativ zur Stellung (rad, + = links)
 	var aim_pitch := 0.0            ## + = hoch
+	## 0.12.1: Seelenachse wie Fahrzeugtürme (Vehicle.rig_axis, 0.11.9): Mündung SHDUM im Rohr-Frame BARREL bestimmt die
+	## Achse im Raum des Richt-Frames; Grenzen gelten relativ zur Ruhelage dieser Achse (Rohr-Frame-Parameter up/down/
+	## left/right, hd2.exe 0x4C1AD0/0x4C2580 wie bei Fahrzeugen) [B Daten]. Vorher: Achse fest −Z, Höhengrenzen absolut.
+	var barrel: Node3D
+	var axis_local := Vector3.FORWARD     ## Seelenachse im Raum des Richt-Frames (VERT, sonst HORT)
+	var rest_dir_frame := Vector3.FORWARD ## Seelenachse in Ruhe im Raum des Stellungs-Frames
 
 	## Drehachsen des Originalmodells suchen (nur bei Stellungen aus interactive.json; eigene Kartenwaffen
 	## wie Flak-Unterklassen eigener Karten steuern ihr Modell selbst)
@@ -1680,12 +1686,32 @@ class OrigEmplacement extends Interactable:
 				muzzle = n
 			elif seat == null and nm.begins_with("SEAT"):
 				seat = n
+			elif barrel == null and nm.begins_with("BARREL"):
+				barrel = n
 		if hort:
 			base_h = hort.transform
 		if vert:
 			base_v = vert.transform
+		_setup_axis()
 		if seat:
 			global_position = seat.global_position + Vector3.UP * 0.5
+
+	## Seelenachse aus der Mündung (gemeinsame Funktion der Fahrzeugtürme) und ihre Ruhelage im Stellungs-Frame
+	func _setup_axis() -> void:
+		var piv: Node3D = vert if vert else hort
+		if piv == null or String(Game.cli.get("emp_axis", "1")) == "0":    # --emp_axis=0: Stand vor 0.12.1 (Vergleich)
+			return
+		axis_local = Vehicle.rig_axis(piv, barrel, muzzle)
+		var t = Vehicle._rel_xform(piv, frame)
+		if t != null:
+			rest_dir_frame = ((t as Transform3D).basis * axis_local).normalized()
+
+	## Ruhe-Seelenachse in Weltkoordinaten → (Seitenwinkel, Höhenwinkel)
+	func _rest_angles() -> Vector2:
+		var dw := (frame.global_basis * rest_dir_frame).normalized()
+		if Vector2(dw.x, dw.z).length() < 0.05:
+			return Vector2(frame.global_basis.get_euler().y, 0.0)
+		return Vector2(atan2(-dw.x, -dw.z), asin(clampf(dw.y, -1.0, 1.0)))
 
 	## Mündung des Originalmodells (Schussursprung, Soldier._fire_shot)
 	func shot_origin() -> Vector3:
@@ -1705,23 +1731,27 @@ class OrigEmplacement extends Interactable:
 	func _aim_rig() -> void:
 		if hort == null and vert == null:
 			return
-		var base_yaw := frame.global_basis.get_euler().y
+		var ra := _rest_angles()
+		var base_yaw := ra.x
 		var rel := wrapf(gunner.look_yaw - base_yaw, -PI, PI)
 		rel = clampf(rel, -deg_to_rad(lim["right"]), deg_to_rad(lim["left"]))
-		var pit := clampf(gunner.look_pitch, -deg_to_rad(lim["down"]), deg_to_rad(lim["up"]))
+		var pit := clampf(gunner.look_pitch - ra.y, -deg_to_rad(lim["down"]), deg_to_rad(lim["up"]))
 		gunner.look_yaw = base_yaw + rel
-		gunner.look_pitch = pit
+		gunner.look_pitch = clampf(ra.y + pit, -1.5, 1.5)
 		_rig_sound(absf(rel - aim_yaw) + absf(pit - aim_pitch) > 0.0005, get_physics_process_delta_time())
 		aim_yaw = rel
 		aim_pitch = pit
 		if hort:
 			hort.transform = Transform3D(Basis(Vector3.UP, rel) * base_h.basis, base_h.origin)
 		if vert:
-			var b := base_v.basis * Basis(Vector3.RIGHT, pit)
+			# Höhenrichten um die Querachse der Seelenachse (−Z-Modelle: lokal X wie bisher)
+			var pax := axis_local.cross(Vector3.UP)
+			pax = pax.normalized() if pax.length() > 0.1 else Vector3.RIGHT
+			var b := base_v.basis * Basis(pax, pit)
 			if hort == null:
 				b = Basis(Vector3.UP, rel) * b
-			# Rückstoß: Rohr fährt beim Schuss bis 3 cm zurück (lokal +Z), Hände folgen den Griffen [E]
-			vert.transform = Transform3D(b, base_v.origin + b * Vector3(0, 0, 0.03 * _kick))
+			# Rückstoß: Rohr fährt beim Schuss bis 3 cm entgegen der Seelenachse zurück, Hände folgen den Griffen [E]
+			vert.transform = Transform3D(b, base_v.origin - b * (axis_local * 0.03 * _kick))
 
 	## Richtklänge wie Fahrzeugtürme (Vehicle._turret_sound, hd2.exe 0x4C2580): Bewegung → SOUNDM-Schleife (z. B. 60
 	## „All Cannons work“, 78 „All Machingun work“), > 300 ms Stillstand → Schleife aus, SOUNDS (z. B. 79) [B]
@@ -1752,10 +1782,10 @@ class OrigEmplacement extends Interactable:
 			if snd_s >= 0:
 				_snd_stop = OrigAudio.play_group(3, snd_s, src.global_position, src)
 
-	## Rohrrichtung in Weltkoordinaten (Modelle: Lauf entlang −Z)
+	## Rohrrichtung in Weltkoordinaten (0.12.1: Seelenachse aus der Mündung, Vehicle.rig_axis)
 	func barrel_dir() -> Vector3:
 		var p: Node3D = vert if vert else hort
-		return -(p.global_basis.z.normalized()) if p else -frame.global_basis.z
+		return (p.global_basis * axis_local).normalized() if p else -frame.global_basis.z
 
 	# --- Bedienhaltung des Schützen (docs/re_notes_weapons.md §11) ------------------------------------------
 	## Original: Figur am Sitz-Frame SEAT00, Ganzkörper-Clip aus TABLES\anim.sav (Tabelle 0x1B36C) je Haltungsziffer

@@ -481,9 +481,10 @@ func _run_fsm(m, rt: LsRuntime, c: Soldier, space: PhysicsDirectSpaceState3D) ->
 			tails_ok = false
 		if a == OrigCombatFsm.S_CLOSE and not (b in [OrigCombatFsm.S_ADVANCE, OrigCombatFsm.S_LOST]):
 			tails_ok = false
-		if a == OrigCombatFsm.S_LOST and b != OrigCombatFsm.S_HOME:
+		# 0.12.1: aus 2/13 auch Neustart 0 bei Sichtkontakt (Kopfzweig 0x549AE0)
+		if a == OrigCombatFsm.S_LOST and not (b in [OrigCombatFsm.S_HOME, OrigCombatFsm.S_OPEN]):
 			tails_ok = false
-		if a == OrigCombatFsm.S_HOME and b != OrigCombatFsm.S_REST:
+		if a == OrigCombatFsm.S_HOME and not (b in [OrigCombatFsm.S_REST, OrigCombatFsm.S_OPEN]):
 			tails_ok = false
 	check(tails_ok, "Übergänge 10/11 → 9 oder 2, 2 → 13 → 12", str(fsm.history))
 	# Statistik der Fortsetzung (60 %/80 %) mit festem Samen über die Zufallsquelle des Automaten
@@ -516,6 +517,36 @@ func _run_fsm(m, rt: LsRuntime, c: Soldier, space: PhysicsDirectSpaceState3D) ->
 	check(not b1.skip_reaction, "AP-48b: Reaktionssperre nur während des Automatenschusses ausgesetzt", "rt %.2f" % b_rt)
 	check(OrigCombatFsm.APPROACH_MIN == 20.0 and OrigCombatFsm.CLOSE_DIST == 6.0 and OrigCombatFsm.REPORT_DIST == 30.0,
 		"Schwellen 20 m / 6 m / 30 m")
+
+	# 6b) 0.12.1 KI-Stillstand: Zustand 2/13/12 mit sichtbarem Feind → Neustart Zustand 0 (vorher 15–25 s geduckt stehen)
+	var per2 := b1.perception
+	for mode in ["1", "0"]:
+		Game.cli["b0121"] = mode
+		for st in [OrigCombatFsm.S_LOST, OrigCombatFsm.S_HOME, OrigCombatFsm.S_REST]:
+			var lf := OrigCombatFsm.new(b1)
+			lf.rng.seed = 3
+			lf.target = c
+			lf._enter(st, 20000.0)
+			if st == OrigCombatFsm.S_HOME:
+				b1.move_to(b1.home_pos + Vector3(8, 0, 0), Soldier.MoveMode.RUN)
+			per2.visible_now[c] = true
+			per2.awareness[c] = 1.0
+			lf.tick(0.016)
+			var restarted := lf.history.has(OrigCombatFsm.S_OPEN)
+			if mode == "1":
+				check(restarted and lf.reacquires == 1, "0.12.1: Zustand %d + Sicht → Neustart 0" % st, str(lf.history))
+			else:
+				check(not restarted, "0.12.1: --b0121=0 bleibt in Zustand %d" % st, str(lf.history))
+		# ohne Sicht: Zustand 2 wartet weiter (Zeitgeber [B])
+		if mode == "1":
+			var wf := OrigCombatFsm.new(b1)
+			wf.target = c
+			wf._enter(OrigCombatFsm.S_LOST, 20000.0)
+			per2.visible_now[c] = false
+			wf.tick(0.016)
+			check(wf.state == OrigCombatFsm.S_LOST and wf.reacquires == 0, "0.12.1: Zustand 2 ohne Sicht wartet (15–25 s)", str(wf.history))
+	Game.cli.erase("b0121")
+	b1.stop_moving()
 
 	# 7) Defensiv: Zustand 8 ohne sichtbares Ziel → 2 → Heimweg; MP-/Übungs-KI unberührt (Regel nur mit LsRuntime offline)
 	var d1 := OrigCombatFsm.new(b1)

@@ -41,13 +41,14 @@ START
   Voraussetzung: 64-Bit-Linux mit Vulkan-faehigem Grafiktreiber (Mesa/NVIDIA), glibc wie aktuelle Distributionen.
 
 ORIGINALDATEN (eigene Installation von Hidden & Dangerous 2 noetig)
-  Das Werkzeugmenue (HD2-Werkzeuge) laeuft derzeit nur unter Windows. Vorgehen fuer Linux:
-  1. Auf einem Windows-PC (oder in einer Windows-VM) mit dem Windows-Paket den Export ausfuehren
-     (HD2-Werkzeuge.cmd: 1) Suchen, 2) Einrichten, 3) Spieldaten exportieren).
-  2. Den entstandenen Ordner orig_cache\ komplett neben DangerousHidden2.x86_64 kopieren
-     (Ordnername klein: orig_cache). Dateinamen darin nicht umbenennen.
-  Die Originalinstallation selbst (Steam/GOG, auch unter Proton/Wine) wird vom Spiel nicht gelesen,
-  nur orig_cache. Die erzeugten Daten stammen aus dem eigenen Spiel - nicht weitergeben.
+  Werkzeugmenue fuer Linux (im Paketordner):  bash tools/user/hd2_menu.sh
+  1) Suchen (Steam, Heroic/GOG, Lutris, Wine-Praefixe), 2) Einrichten (python3-venv in werkzeuge/,
+  ffmpeg aus der Distribution), 3) Spieldaten exportieren -> orig_cache/ neben DangerousHidden2.x86_64.
+  Voraussetzung: python3 (3.10-3.14) mit venv/pip, fuer Filme ffmpeg (z. B. sudo apt install python3-venv ffmpeg).
+  Ohne Menue: bash tools/user/hd2_menu.sh --aktion Export --orig "<Ordner mit hd2.exe>"  (--help fuer alle Optionen)
+  Alternativ: orig_cache\ aus einem Windows-Export komplett hierher kopieren (Ordnername klein, Dateien nicht umbenennen).
+  Die Originalinstallation wird nur gelesen; das Spiel selbst liest nur orig_cache.
+  Die erzeugten Daten stammen aus dem eigenen Spiel - nicht weitergeben.
 
 UPDATE
   Neue Version: Programm, .pck und version.txt gemeinsam ersetzen; orig_cache/ bleibt.
@@ -76,12 +77,13 @@ START
   Requirements: 64-bit Linux with a Vulkan-capable graphics driver (Mesa/NVIDIA).
 
 ORIGINAL GAME DATA (requires your own installation of Hidden & Dangerous 2)
-  The tools menu (HD2-Werkzeuge) currently runs on Windows only. For Linux:
-  1. On a Windows PC (or Windows VM) run the export with the Windows package
-     (HD2-Werkzeuge.cmd: 1) find, 2) set up, 3) export game data).
-  2. Copy the resulting folder orig_cache\ next to DangerousHidden2.x86_64
-     (lower-case folder name: orig_cache). Do not rename files inside.
-  The game never reads the original installation (Steam/GOG, Proton/Wine), only orig_cache.
+  Linux tools menu (inside the package folder):  bash tools/user/hd2_menu.sh
+  1) find (Steam, Heroic/GOG, Lutris, Wine prefixes), 2) set up (python3 venv in werkzeuge/,
+  ffmpeg from your distribution), 3) export game data -> orig_cache/ next to DangerousHidden2.x86_64.
+  Requirements: python3 (3.10-3.14) with venv/pip, ffmpeg for movies (e.g. sudo apt install python3-venv ffmpeg).
+  Without menu: bash tools/user/hd2_menu.sh --action Export --source "<folder containing hd2.exe>"  (--help lists all options)
+  Alternatively copy orig_cache\ from a Windows export here (lower-case folder name, do not rename files).
+  The original installation is only read; the game itself reads only orig_cache.
   The generated data comes from your own game - do not distribute it.
 
 UPDATE

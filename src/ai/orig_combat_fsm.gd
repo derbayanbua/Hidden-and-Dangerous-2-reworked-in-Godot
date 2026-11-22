@@ -438,8 +438,35 @@ func _st_close(delta: float) -> void:
 		_enter(S_LOST, _rand_ms(LOST_MS))
 
 
+## 0.12.1 KI-Stillstand: Zustand 2 gibt das Ziel frei (+0x148 = 0, 0x5ADD20) [B]; 13/12 laufen ohne Ziel [B]. Sieht der
+## Gegner danach (wieder) einen Feind, greift im Original der Kopf von 0x549AE0 (0x5582F0 && 0x553CC0 → 0x54AB00/0x548890)
+## vor dem Automaten [B Aufruf, P Bedeutung „Sichtkontakt → neues Gefecht“]. Nachbau hielt das alte Ziel fest und blieb
+## 15–25 s (bzw. in einer Schleife 2→13→12→Kampf→2) geduckt stehen, obwohl das Ziel sichtbar war. Jetzt: sichtbarer Feind
+## in 2/13/12 → Neustart in Zustand 0 (wie on_hit/K11). `--b0121=0` = Stand davor.
+static func b0121() -> bool:
+	return String(Game.cli.get("b0121", "1")) != "0"
+
+
+var reacquires := 0              ## Neustarts aus 2/13/12 durch Sichtkontakt (Test/Messung)
+
+
+func _reacquire() -> bool:
+	if not b0121() or brain == null or brain.perception == null:
+		return false
+	var t := brain.perception.best_target()
+	if t == null or not is_instance_valid(t) or not t.alive or t.team == brain.soldier.team \
+			or t.team == Soldier.TEAM_NEUTRAL:
+		return false
+	reacquires += 1
+	brain.target = t
+	start(t)
+	return true
+
+
 func _st_lost() -> void:
 	# Ziel freigeben, Haltung 3 (außer Flag 0x400000 „Haltung nicht ändern“) [B]; Haltung 3 = hocken [P]
+	if _reacquire():
+		return
 	brain.stop_moving()
 	_stance = Soldier.Stance.CROUCH
 	# Gap-Analyse Arktis (09.11.2026) [P]: Schießen liegt vor dem Automaten (0x549AE0-Kopf, Sichtliste +0x268,
@@ -455,6 +482,8 @@ func _st_lost() -> void:
 
 
 func _st_home() -> void:
+	if _reacquire():
+		return
 	if brain.has_move_target() and not brain.arrived(1.5) and _state_s < 60.0:
 		face_move = true
 		return
@@ -464,6 +493,8 @@ func _st_home() -> void:
 
 
 func _st_rest(_delta: float) -> void:
+	if _reacquire():
+		return
 	brain.stop_moving()
 	_stance = Soldier.Stance.STAND
 	if timer_ms <= 0.0:

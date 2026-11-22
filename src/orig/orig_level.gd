@@ -197,6 +197,9 @@ const HELIX_PATCHES := {
 }
 
 
+const HELIX_SEG := 4     ## Tritte je Wendel-Abschnitt (4 × 30° = 120°), 0 = durchgehend (alter Stand)
+
+
 func _apply_helix_patches() -> void:
 	var key := mission_dir.get_file().to_lower()
 	if not HELIX_PATCHES.has(key) or Game.cli.has("nav_stair_links_off"):
@@ -215,11 +218,28 @@ func _apply_helix_patches() -> void:
 			var a := deg_to_rad(float(h["a0"]) + float(h["da"]) * k)
 			# + 0,6·Steigung: Kastenoberkante liegt über den Trittkanten (sonst verdecken die gestuften Tritte die Wendel
 			# im Recast-Höhenfeld und es entsteht wieder kein Netz)
-			pts.append(Vector3(c.x + cos(a) * float(h["r"]), c.y + float(h["dy"]) * (k + 0.6), c.z + sin(a) * float(h["r"])))
+			# 0.12.1: Standard 1,2·Steigung – bei 0,6 lag die Kastenoberkante unter dem überlappenden nächsten Tritt (kein
+			# Kopfraum → Recast verwarf die Wendel bis auf ein Polygon je Umdrehung); jetzt ist der Kasten oberste Fläche.
+			pts.append(Vector3(c.x + cos(a) * float(h["r"]), c.y + float(h["dy"]) * (k + float(h.get("lift", 1.2))),
+				c.z + sin(a) * float(h["r"])))
 		pts.append(h["top"])
+		# 0.12.1 (B-0121): eine durchgehende Wendel überdeckt sich in der Draufsicht je Umdrehung → Recast legt sie als EINE
+		# Region an, die Kontur bricht (Polygone von 5 bis 23 m Höhe, test_stairs T1 Pfad✗). Darum Abschnitte von höchstens
+		# HELIX_SEG Tritten (< halbe Umdrehung) mit je einem Tritt Lücke, die Lücken überbrückt ein Link „stair“.
+		var seg := int(h.get("seg", HELIX_SEG))
 		for i in range(1, pts.size()):
 			var a: Vector3 = pts[i - 1]
 			var b: Vector3 = pts[i]
+			if seg > 0 and i > 1 and i < pts.size() - 1 and (i - 1) % (seg + 1) == seg:
+				var lk := NavigationLink3D.new()
+				lk.name = "HelixLink%d" % i
+				lk.bidirectional = true
+				lk.set_meta("stair", true)
+				nb.add_child(lk)
+				lk.start_position = pts[i - 1] + Vector3.UP * 0.1
+				lk.end_position = b + Vector3.UP * 0.1
+				stats["stair_links"] = int(stats.get("stair_links", 0)) + 1
+				continue
 			var d := b - a
 			var flat := Vector3(d.x, 0, d.z)
 			if flat.length() < 0.05:
@@ -245,6 +265,11 @@ const REAL_RAMPS := {
 	"czech1": [[Vector3(-2.2, 0.0, 12.0), Vector3(-2.2, 4.5, 17.4)]],
 	"czech1_obj": [[Vector3(-2.2, 0.0, 12.0), Vector3(-2.2, 4.5, 17.4)]],
 	"normandy_mp": [[Vector3(-26.0, -0.3, -87.8), Vector3(-31.1, 2.9, -82.7)]],
+	# 0.12.1 (B-0121): Kirchturm T2 (≈ 50°, Tritte überdecken sich in der Draufsicht → die Kapsel stößt mit dem Kopf an
+	# den nächsten Tritt, kein Deckenkörper; probe_nav). Rampe ab 1,1 m vor dem Fuß bis auf den Austrittsboden (y 47,4)
+	# → 44°, unter Soldier.floor_max_angle.
+	"czech4": [[Vector3(-4.2, 43.3, 6.3), Vector3(0.0, 47.4, 6.5)]],
+	"czech5": [[Vector3(-4.2, 43.3, 6.3), Vector3(0.0, 47.4, 6.5)]],
 }
 
 
@@ -274,9 +299,52 @@ func _apply_real_ramps() -> void:
 		stats["real_ramps"] = int(stats.get("real_ramps", 0)) + 1
 
 
+## 0.12.1 (B-0121): Links „stair“ (wie WALK_PATCHES-Art „stair“: a = unterster, b = oberster Tritt aus test_stairs) für
+## Karten OHNE Hand-Korrekturen. Eigener Knoten „StairLinks“ statt des WalkPatches-Körpers, damit Mission._bake_tiles die
+## automatischen Treppen-Rampen (StairFinder) der übrigen Karte behält. Für steile, leiterartige Läufe (≈ 50°, über
+## agent_max_slope/REAL_RAMPS-Grenze), die Recast nicht vernetzt; Links sind dynamisch (nicht im Navmesh-Cache).
+const STAIR_LINKS := {
+	# CZECH4/5 T2 (Kirchturm, ≈ 50°, oben Netz bei y 47,5). CZECH4 T3 (Dachboden-Stiege ≈ 49°): Dachboden Blbuild102
+	# y 31,3 mit 2–4 m Raum bis zum Dach und Netz (probe_nav; der frühere „0,5 m Kopfraum“-Befund war ein Messartefakt).
+	"czech4": [[Vector3(-3.1, 43.4, 6.3), Vector3(-0.3, 46.8, 6.5)], [Vector3(-86.6, 28.4, -8.3), Vector3(-86.6, 31.4, -10.9)]],
+	"czech5": [[Vector3(-3.1, 43.4, 6.3), Vector3(-0.3, 46.8, 6.5)]],
+}
+
+
+func _apply_stair_links() -> void:
+	var key := mission_dir.get_file().to_lower()
+	if not STAIR_LINKS.has(key) or Game.cli.has("nav_stair_links_off"):
+		return
+	var holder := Node3D.new()
+	holder.name = "StairLinks"
+	root.add_child(holder)
+	for ab: Array in STAIR_LINKS[key]:
+		var a: Vector3 = ab[0]
+		var b: Vector3 = ab[1]
+		var dir := Vector3(b.x - a.x, 0.0, b.z - a.z).normalized()
+		var link := NavigationLink3D.new()
+		link.name = "StairLink%d" % holder.get_child_count()
+		link.bidirectional = true
+		link.set_meta("stair", true)
+		holder.add_child(link)
+		link.start_position = a - dir * 0.55 + Vector3.DOWN * 0.16
+		link.end_position = b + dir * 0.45 + Vector3.UP * 0.16
+		stats["stair_links"] = int(stats.get("stair_links", 0)) + 1
+
+
+## 0.12.1 (B-0121): Karten, deren Navmesh mit Layer-Partition gebacken wird (Mission._bake_tiles, Meta am Level-Knoten):
+## alle mit Wendeltreppen (HELIX_PATCHES) und ARCTIC2 (Watershed erzeugte dort überlappende Polygone → „2 edge error(s)“,
+## mit Layer-Partition 0 bei gleicher Erreichbarkeit 30/30). ARCTIC3 nicht: Layer-Bake sprengte dort die Testzeit.
+const NAV_LAYER_MAPS := ["arctic2"]
+
+
 func _apply_walk_patches() -> void:
+	var map_key := mission_dir.get_file().to_lower()
+	if HELIX_PATCHES.has(map_key) or map_key in NAV_LAYER_MAPS:
+		root.set_meta("nav_partition_layers", true)
 	_apply_helix_patches()
 	_apply_real_ramps()
+	_apply_stair_links()
 	var key := mission_dir.get_file().to_lower()
 	if not WALK_PATCHES.has(key):
 		return
@@ -653,6 +721,12 @@ func _build_orig_collision() -> void:
 		# (versteckt, Klz-Fläche, ~ganzer Bahnhof) hob sonst die Kollision von 2403 sichtbaren Frames auf (Treppen, Möbel;
 		# test_stairs CZECH1 0/5) [B-010]
 		var huge: bool = maxf(wb.size.x, wb.size.z) > PROXY_MAX_EXTENT or String(mi.get_path()).contains("tactical_mode")
+		# 0.12.1 (B-0121): eine sichtbare, überwiegend nach UNTEN zeigende Schräge ist eine Treppenuntersicht (CZECH3 T3
+		# villa360, 0,5 m unter den Tritten), keine Designer-Rampe – sonst verloren die Tritte darüber ihre Kollision, der
+		# Soldat lief auf der Untersicht und stieß oben 0,5 m unter dem Boden an. `--klz_soffit_off` = alter Stand.
+		if ramp and not Game.cli.has("klz_soffit_off") and _mostly_down(mi):
+			ramp = false
+			stats["soffits"] = int(stats.get("soffits", 0)) + 1
 		if ((e[1] and sh.x >= 0.2) or ramp) and not huge:
 			proxies.append((mi.global_transform * mi.get_aabb()).grow(0.3))
 			proxy_names.append(String(mi.name))
@@ -779,6 +853,56 @@ static func _vol(b: AABB) -> float:
 
 ## Flächenanteile: x = begehbar (|n.y| > 0,5; Rampen/Podeste ja, reine Wände/Kartenrand nein),
 ## y = Rampe (10–50° geneigt)
+## 0.12.1 (B-0121): Klz-Flächen wirken im Original beidseitig (Physik hier ebenso, backface_collision), Recast nimmt
+## aber nur nach oben gewickelte Dreiecke als begehbar. NORMANDY2_MP_ZONE: Obergeschossböden (H49_12, H57_12 bei y 3,1)
+## sind nach unten gewickelt (probe_b010d_grid --src_dump: n = (0,−1,0)) → fehlten im Netz, Spawns/Zonen dort
+## unerreichbar. Einzelne nach unten zeigende, flache (≤ 60°) Dreiecke werden umgedreht; die Physik bleibt gleich.
+## `--klz_floor_flip_off` = alter Stand.
+## Nur für die Karten mit belegt verkehrt gewickelten Böden (`FLOOR_FLIP_MAPS`): kartenweit umgedreht wurden auch echte
+## Decken-/Dach-/Überhang-Untersichten zu begehbaren Recast-Flächen (ARCTIC1-Arena: test_bots Deckungsfeuer ohne
+## Niederhalten/Stellungswechsel, Abstand und HD2-Aufgaben-Zielerreichung rot). `--klz_floor_flip_all` = alle Karten.
+const FLOOR_FLIP_MAPS := ["normandy2_mp_zone", "czech2_mp_zone"]
+
+
+func _floor_flip_map() -> bool:
+	if Game.cli.has("klz_floor_flip_off"):
+		return false
+	return Game.cli.has("klz_floor_flip_all") or mission_dir.get_file().to_lower() in FLOOR_FLIP_MAPS
+
+
+func _flip_down_faces(mi: MeshInstance3D, shape: ConcavePolygonShape3D) -> void:
+	var f := shape.get_faces()
+	var b := mi.global_transform.basis if mi.is_inside_tree() else mi.transform.basis
+	var n_flip := 0
+	for i in range(0, f.size() - 2, 3):
+		var n := (b * (f[i + 2] - f[i])).cross(b * (f[i + 1] - f[i]))   # Godot-Vorderseite (im Uhrzeigersinn), Welt
+		if n.y < 0.0 and -n.y > 0.5 * n.length():
+			var t := f[i + 1]
+			f[i + 1] = f[i + 2]
+			f[i + 2] = t
+			n_flip += 1
+	if n_flip > 0:
+		shape.set_faces(f)
+		stats["floor_tris_flipped"] = int(stats.get("floor_tris_flipped", 0)) + n_flip
+
+
+## Sichtbare Vorderseiten (Godot: im Uhrzeigersinn) überwiegend nach unten (unten > 2 × oben, wie _orient_proxy_up)
+static func _mostly_down(mi: MeshInstance3D) -> bool:
+	var f := mi.mesh.get_faces()
+	var b := mi.global_transform.basis
+	var up := 0.0
+	var down := 0.0
+	for i in range(0, f.size() - 2, 3):
+		var n := (b * (f[i + 2] - f[i])).cross(b * (f[i + 1] - f[i]))
+		if absf(n.y) <= 0.5 * n.length():
+			continue
+		if n.y > 0.0:
+			up += n.length()
+		else:
+			down += n.length()
+	return down > 2.0 * up
+
+
 static func _slope_shares(mi: MeshInstance3D) -> Vector2:
 	var f := mi.mesh.get_faces()
 	var b := mi.global_transform.basis
@@ -1009,6 +1133,9 @@ func _mesh_collider(mi: MeshInstance3D, collide: bool, two_sided := false, klz_f
 			cs.shape = cps
 		if mi.has_meta("klz_proxy") and not Game.cli.has("nav_proxy_flip_off") and cs.shape is ConcavePolygonShape3D:
 			_orient_proxy_up(mi, cs.shape as ConcavePolygonShape3D)
+		elif klz_faces and cs.shape is ConcavePolygonShape3D and _floor_flip_map() \
+				and not String(mi.get_path()).contains("/BORDER/"):
+			_flip_down_faces(mi, cs.shape as ConcavePolygonShape3D)
 		# B-036: Kartengrenze „BORDER“ (Wände + Deckel, ARCTIC3 Deckel bei y 22,4 tiefer als die Hügel) nur einseitig –
 		# beidseitig war die Deckeloberseite begehbar, der Löser lief in a3 auf ihr kreuz und quer über die Karte
 		# nur Deckelteile (Unterkante ≥ 10 m über dem Ursprung, z. B. ARCTIC3 Border_15…29 bei 15,3…22,4); Seitenwände

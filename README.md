@@ -149,6 +149,15 @@ Für Spieler gibt es ein einfaches Konsolen-Menü – keine Programmierkenntniss
 
 Alle Schritte gehen auch ohne Menü, z. B.
 `powershell -ExecutionPolicy Bypass -File tools\user\hd2_menu.ps1 -Aktion Export -Orig "C:\Spiele\Hidden & Dangerous 2"`.
+
+**Linux:** Dasselbe Menü gibt es als `tools/user/hd2_menu.sh` (gleiche Menüpunkte, Optionen und Statusdateien).
+Aufruf im Paketordner mit `bash tools/user/hd2_menu.sh` (aus dem Archiv heraus ohne Ausführungsrecht, daher über
+`bash`), ohne Menü z. B. `bash tools/user/hd2_menu.sh --aktion Export --orig ~/.steam/steam/steamapps/common/"Hidden & Dangerous 2"`
+(`--help` listet alle Optionen). Die Suche prüft Steam, Heroic/GOG, Lutris, Bottles und Wine-Präfixe (`drive_c`).
+Benötigt werden `python3` (3.10–3.14) mit `venv`/`pip` – die Pakete landen in einer eigenen Umgebung unter
+`werkzeuge/pyenv` – und für die Filme `ffmpeg` aus der Distribution (z. B. `sudo apt install python3-venv ffmpeg`);
+das Skript installiert keine Systempakete selbst. „Spiel starten“ startet `DangerousHidden2.x86_64`.
+
 Die erzeugten Daten stammen aus dem eigenen Spiel und dürfen nicht weitergegeben werden.
 
 > 💡 **Nur einmal exportieren:** Die einmal exportierten bzw. hochskalierten Originaldaten (`orig_cache\`) und die
@@ -332,6 +341,15 @@ For players there is a simple console menu – no programming knowledge needed:
 
 All steps also work without the menu, e.g.
 `powershell -ExecutionPolicy Bypass -File tools\user\hd2_menu.ps1 -Aktion Export -Orig "C:\Games\Hidden & Dangerous 2"`.
+
+**Linux:** the same menu is available as `tools/user/hd2_menu.sh` (same menu items, options and status files).
+Run it inside the package folder with `bash tools/user/hd2_menu.sh` (files extracted from the archive are not
+executable, hence `bash`); without the menu e.g. `bash tools/user/hd2_menu.sh --action Export --source ~/.steam/steam/steamapps/common/"Hidden & Dangerous 2"`
+(`--help` lists all options). The search covers Steam, Heroic/GOG, Lutris, Bottles and Wine prefixes (`drive_c`).
+It needs `python3` (3.10–3.14) with `venv`/`pip` – packages go into a private environment in `werkzeuge/pyenv` –
+and `ffmpeg` from your distribution for the movies (e.g. `sudo apt install python3-venv ffmpeg`); the script never
+installs system packages itself. "Start game" launches `DangerousHidden2.x86_64`.
+
 The generated data comes from your own game and must not be redistributed.
 
 > 💡 **Export only once:** once exported and/or upscaled, the original data (`orig_cache\`) and the installed tools

@@ -137,6 +137,12 @@ func _cause(s: Soldier, b: EnemyBrain) -> Array:
 			return ["kein_pfad", d]
 		return ["festgefahren", d]
 	if b.state == EnemyBrain.State.COMBAT:
+		# 0.12.1: Zustand 2 „Verloren“ wartet laut 0x549AE0 geduckt rand·10000+15000 ms ohne Ziel [B] – solange der
+		# Zeitgeber läuft und kein Feind sichtbar ist, ist das Originalverhalten (erlaubt); darüber hinaus = Fehler.
+		if b.orig_fsm != null and b.orig_fsm.state == OrigCombatFsm.S_LOST:
+			d += " rest=%.0fms" % b.orig_fsm.timer_ms
+			if b.orig_fsm.timer_ms > 0.0 and b.perception.best_target() == null:
+				return ["verloren_wartet", d]
 		if not is_instance_valid(b.target) or not b.target.alive or b.perception.awareness.get(b.target, 0.0) < 1.0:
 			return ["keine_wahrnehmung", d]
 		var tg := _path_end_gap(s.global_position, b.target.global_position)
@@ -150,7 +156,7 @@ func _cause(s: Soldier, b: EnemyBrain) -> Array:
 	return ["zustand_" + b.state_name(), d]
 
 
-const ALLOWED := ["stellung", "sniper", "skript_haelt", "ziel_unerreichbar_sicht"]
+const ALLOWED := ["stellung", "sniper", "skript_haelt", "ziel_unerreichbar_sicht", "verloren_wartet"]
 
 
 func _sample() -> void:

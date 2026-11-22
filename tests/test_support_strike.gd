@@ -77,9 +77,176 @@ func _run() -> void:
 	await get_tree().process_frame
 	if peer_mode:
 		await _client()
+	elif Game.cli.has("ss_probe"):
+		await _probe()
 	else:
 		await _host()
 	_finish()
+
+
+# --- Sonde (nur Host): Funkgerät-Stellen einer Karte wie ein Spieler prüfen --------------------------------
+##  tools\run_tests.ps1 -Only test_support_strike -ExtraArgs "--ss_probe=1 --ss_map=<id>"
+
+func _probe() -> void:
+	Net.local_name = "Host"
+	Net.local_team = Soldier.TEAM_ALLIED
+	var ok := Net.host({"name": "Funk", "map": _map(), "mode": int(Game.MISSIONS.get(_map(), {}).get("mp_mode", Net.Mode.TEAM_DEATHMATCH)),
+		"port": Net.PORT + PORT_OFS, "max_players": 8, "time_limit_min": 0, "score_limit": 0, "warmup_s": 0, "respawn_s": 3,
+		"bots_per_team": 0, "password": "", "allow_vehicles": false, "allow_respawn": true,
+		"support_strike": 3, "support_interval_min": 1, "flood_protect": false})
+	check(ok, "Server gestartet", Net.last_error)
+	await wait_for(func(): return Game.current_mission() != null and Game.current_mission().is_node_ready() and Net._soldiers.has(1), 400.0)
+	var m: Mission = Game.current_mission()
+	await wait_for(func(): return m.nav_ready, 240.0)
+	var sup: SupportStrike = Net.support
+	await wait_for(func(): return sup.map_open, 5.0)
+	var pts: Array = m.mp_spawns() if m.has_method("mp_spawns") else []
+	var box := AABB(pts[0]["pos"], Vector3.ZERO) if not pts.is_empty() else AABB()
+	for p in pts:
+		box = box.expand(p["pos"])
+	check(sup.map_open, "Karte offen", "%s spawns=%d ausdehnung=%.0f m mitte=%s boden=%s erneut=%s" % [_map(), pts.size(),
+		Vector2(box.size.x, box.size.z).length(), sup.center, sup._find_ground(sup.center, false), sup._detect_open()])
+	if not sup.map_open:
+		var c := sup.center
+		var down := sup._ray(c + Vector3.UP * 150.0, c + Vector3.DOWN * 300.0)
+		lines.append("DIAG down=%s" % _hit_s(down))
+		if not down.is_empty():
+			var g: Vector3 = down["position"]
+			lines.append("DIAG up=%s" % _hit_s(sup._ray(g + Vector3.UP * 0.6, g + Vector3.UP * SupportStrike.SKY_CLEAR)))
+		var g2 := sup._ray(c + Vector3.UP * 3.0, c + Vector3.DOWN * 20.0)
+		lines.append("DIAG nah=%s" % _hit_s(g2))
+		if not g2.is_empty():
+			var gg: Vector3 = g2["position"]
+			lines.append("DIAG nah_up=%s" % _hit_s(sup._ray(gg + Vector3.UP * 0.6, gg + Vector3.UP * SupportStrike.SKY_CLEAR)))
+		print("\n".join(lines.slice(-4)))
+	var cands: Array = sup.spawn_candidates.duplicate()
+	if cands.is_empty():
+		cands = [sup.center]
+	for i in cands.size():
+		sup.spawn_candidates = [cands[i]]
+		sup._set_radio(0, 0, Vector3.INF, 0)
+		await get_tree().process_frame
+		sup.server_spawn()
+		await get_tree().create_timer(0.3).timeout
+		lines.append("STELLE %d orig=%s radio=%s" % [i, cands[i], sup.radio_pos])
+		print(lines[-1])
+		check(sup.radio_state == 1, "Stelle %d: Funkgerät gespawnt" % i)
+		if sup.radio_state == 1:
+			check(_radio_visible(sup), "Stelle %d: Modell sichtbar am Boden" % i, _radio_vis_detail(sup))
+			check(_reachable(m, sup.radio_pos), "Stelle %d: zu Fuß erreichbar" % i, _reach_detail(m, sup.radio_pos))
+			var cv: Vector3 = cands[i]
+			check(Vector2(sup.radio_pos.x - cv.x, sup.radio_pos.z - cv.z).length() < 70.0, "Stelle %d: an der Funkstelle bzw. Kartenmitte" % i)
+	sup.spawn_candidates = cands
+
+
+static func _hit_s(h: Dictionary) -> String:
+	if h.is_empty():
+		return "-"
+	var c = h.get("collider")
+	return "%s n=%s %s" % [h["position"], h["normal"], (c as Node).get_path() if c is Node else str(c)]
+
+
+static func _action(a: String) -> void:
+	var ev := InputEventAction.new()
+	ev.action = a
+	ev.pressed = true
+	Input.parse_input_event(ev)
+	var up := InputEventAction.new()
+	up.action = a
+	up.pressed = false
+	Input.parse_input_event(up)
+
+
+static func _key(code: int) -> void:
+	var ev := InputEventKey.new()
+	ev.keycode = code as Key
+	ev.physical_keycode = code as Key
+	ev.pressed = true
+	Input.parse_input_event(ev)
+	var up := ev.duplicate() as InputEventKey
+	up.pressed = false
+	Input.parse_input_event(up)
+
+
+static func _click() -> void:
+	var ev := InputEventMouseButton.new()
+	ev.button_index = MOUSE_BUTTON_LEFT
+	ev.pressed = true
+	Input.parse_input_event(ev)
+	var up := ev.duplicate() as InputEventMouseButton
+	up.pressed = false
+	Input.parse_input_event(up)
+
+
+## Blick so drehen, dass der Kamerastrahl (Fadenkreuz) auf p zeigt
+func _aim_at(me: Soldier, p: Vector3) -> void:
+	var cam := get_viewport().get_camera_3d()
+	var from: Vector3 = cam.global_position if cam else me.global_position + Vector3.UP * 1.6
+	var d := p - from
+	var h := Vector2(d.x, d.z).length()
+	me.look_yaw = atan2(-d.x, -d.z)
+	# 3.-Person-Kamera sitzt versetzt zum Drehpunkt: tatsächliche Kamerablickrichtung nachführen (sonst trifft der
+	# Fadenkreuzstrahl bei flachem Blick den Boden vor dem Ziel – je nach Standort reproduzierbar ~9 m zu kurz)
+	var corr := float(me.get_meta("_aim_corr", 0.0))
+	if cam:
+		var f := -cam.global_basis.z
+		var cam_pitch := atan2(f.y, Vector2(f.x, f.z).length())
+		var want := atan2(d.y, maxf(h, 0.1))
+		corr = clampf(corr + (want - cam_pitch) * 0.5, -0.5, 0.5)
+		me.set_meta("_aim_corr", corr)
+	me.look_pitch = atan2(d.y, maxf(h, 0.1)) + corr
+
+
+static func _radio_aabb(sup: SupportStrike) -> AABB:
+	var box := AABB()
+	var first := true
+	if not is_instance_valid(sup._radio_node):
+		return box
+	for n in sup._radio_node.find_children("*", "VisualInstance3D", true, false):
+		var vi := n as VisualInstance3D
+		if not vi.is_visible_in_tree():
+			continue
+		var b := vi.global_transform * vi.get_aabb()
+		box = b if first else box.merge(b)
+		first = false
+	return box
+
+
+## Modell im Baum, sichtbar, Unterkante nahe am Boden (nicht im Boden/Himmel), Größe wie ein Funkgerät
+func _radio_visible(sup: SupportStrike) -> bool:
+	var n = sup._radio_node
+	if not is_instance_valid(n) or not n.is_inside_tree() or not n.is_visible_in_tree():
+		return false
+	var b := _radio_aabb(sup)
+	var g: Vector3 = sup.radio_pos
+	return b.size.y > 0.08 and b.size.y < 2.0 and b.position.y > g.y - 0.25 and b.position.y < g.y + 0.4 \
+		and Vector2(b.get_center().x - g.x, b.get_center().z - g.z).length() < 0.8
+
+
+func _radio_vis_detail(sup: SupportStrike) -> String:
+	return "aabb=%s boden=%s" % [_radio_aabb(sup), sup.radio_pos]
+
+
+func _nav_end(m: Mission, p: Vector3) -> Vector3:
+	var map := m.get_world_3d().navigation_map
+	var sp: Array = m.mp_spawns() if m.has_method("mp_spawns") else []
+	var from: Vector3 = sp[0]["pos"] if not sp.is_empty() else p
+	var path := AIBrain.nav_path(map, NavigationServer3D.map_get_closest_point(map, from), p)
+	return path[path.size() - 1] if path.size() > 0 else Vector3.INF
+
+
+func _reachable(m: Mission, p: Vector3) -> bool:
+	var map := m.get_world_3d().navigation_map
+	var q := NavigationServer3D.map_get_closest_point(map, p)
+	if q.distance_to(p) > 1.5:
+		return false
+	var e := _nav_end(m, p)
+	return e.is_finite() and e.distance_to(p) < 2.0
+
+
+func _reach_detail(m: Mission, p: Vector3) -> String:
+	var map := m.get_world_3d().navigation_map
+	return "netz=%s pfadende=%s" % [NavigationServer3D.map_get_closest_point(map, p), _nav_end(m, p)]
 
 
 func _freeze_bots() -> void:
@@ -167,6 +334,11 @@ func _host() -> void:
 	var call_ms := Time.get_ticks_msec()
 	check(not sup.strikes.is_empty(), "Server: Schlag angefordert (Funkgerät verbraucht)", str(sup.radio_state))
 	check(sup.radio_state == 0, "Funkgerät nach dem Schlag weg (genau ein Schlag)")
+	if not sup.strikes.is_empty():
+		var sp: Vector3 = sup.strikes[0]["pos"]
+		check(Vector2(sp.x - target.x, sp.z - target.z).length() < 6.0, "Client hat per Fadenkreuz ungefähr das Ziel anvisiert", "%s ↔ %s" % [sp, target])
+		me.global_position = sp + Vector3.UP * 0.2      # Host steht im tatsächlichen Wirkungsbereich
+		me.velocity = Vector3.ZERO
 	check(sup.markers_shown >= 1, "Host: 3D-Kreis am Ziel sichtbar")
 	await wait_for(func(): return sup.ev_log.any(func(e): return String(e["ev"]) == "wave"), 15.0)
 	var c_ms := 0
@@ -195,11 +367,22 @@ func _host() -> void:
 	await wait_for(func(): return sup.radio_state == 1, 30.0)
 	check(sup.radio_state == 1 and sup.radio_kind != first_kind, "Zweites Funkgerät mit der anderen Art (abwechselnd)", str(sup.radio_kind))
 	me = Net._soldiers[1]
-	me.global_position = sup.radio_pos + Vector3.UP * 0.2
+	check(_radio_visible(sup), "Host: Funkgerät-Modell sichtbar am Boden", _radio_vis_detail(sup))
+	check(_reachable(m, sup.radio_pos), "Host: Funkgerät zu Fuß erreichbar", _reach_detail(m, sup.radio_pos))
+	var hs: Vector3 = sup._find_ground(sup.radio_pos + Vector3(0, 0, 1.2))
+	me.global_position = (hs if hs.is_finite() and absf(hs.y - sup.radio_pos.y) < 0.6 else sup.radio_pos) + Vector3.UP * 0.2
 	me.velocity = Vector3.ZERO
-	var picked := sup.server_pickup(1)
-	check(picked and sup.carrying(), "Host nimmt das Funkgerät auf", "alive=%s d=%.1f state=%d" % [me.alive, me.global_position.distance_to(sup.radio_pos), sup.radio_state])
-	check(sup.open_menu() and sup.menu_open, "Host: Untermenü öffnet")
+	me.look_yaw = 0.0                                # Blick nach Norden (−Z) = zum Funkgerät
+	m.controller.input_enabled = true
+	await wait_for(func(): return m.controller.interact_target == sup._radio_node, 5.0)
+	check(m.controller.interact_target == sup._radio_node, "Host: Benutzen-Ziel ist das Funkgerät", str(m.controller.interact_target))
+	_action("interact")
+	await wait_for(func(): return sup.carrying(), 5.0)
+	check(sup.carrying(), "Host nimmt das Funkgerät per Benutzen-Taste auf", "alive=%s d=%.1f state=%d" % [me.alive, me.global_position.distance_to(sup.radio_pos), sup.radio_state])
+	_action("command_all")
+	await get_tree().process_frame
+	check(sup.menu_open, "Host: Ziffernblock 0 öffnet das Untermenü")
+	m.controller.input_enabled = false
 	var ml := sup.menu_lines()
 	check(not ml[sup.radio_kind + 1].contains("(–)") and ml[2 - sup.radio_kind].contains("(–)"),
 		"Untermenü wie Original: nur passende Art wählbar (T7280/T7281)", " | ".join(ml))
@@ -211,7 +394,7 @@ func _host() -> void:
 	puppet.set_meta("protect_until", 0)
 	var cpos := puppet.global_position
 	var aw: Vector3 = sup._find_ground(base + Vector3(-45, 0, 0))
-	if not cpos.is_finite() or (aw.is_finite() and cpos.distance_to(aw) > 3.0):
+	if not cpos.is_finite() or not sup.sky_open(cpos):
 		cpos = aw if aw.is_finite() else base + Vector3(-45, 0, 0)
 	me.global_position = cpos + Vector3(40, 0, 0) if sup._find_ground(cpos + Vector3(40, 0, 0)).is_finite() else me.global_position
 	_write(STEP_HOST, JSON.stringify({"step": "second", "kind": k2}))
@@ -286,23 +469,70 @@ func _client() -> void:
 	var st = JSON.parse_string(_read(STEP_HOST))
 	await wait_for(func(): return sup.radio_state == 1, 20.0)
 	check(sup.radio_state == 1 and is_instance_valid(sup._radio_node) and sup._radio_node.is_inside_tree(), "Client: Funkgerät sichtbar")
+	check(_radio_visible(sup), "Client: Funkgerät-Modell sichtbar am Boden (nicht im Boden/Himmel)", _radio_vis_detail(sup))
+	await wait_for(func(): return m.nav_ready, 240.0)     # Kachelnetz/Links des Clients erst nach nav_ready vollständig
+	check(_reachable(m, sup.radio_pos), "Client: Funkgerät zu Fuß erreichbar (Navigationsnetz)", _reach_detail(m, sup.radio_pos))
 	var me: Soldier = Net._soldiers[Net.my_id()]
-	me.global_position = sup.radio_pos + Vector3.UP * 0.2
+	# Echter Spielerweg: 1,2 m vor dem Funkgerät stehen, hinschauen, Benutzen-Taste
+	var to_r := Vector3(1.2, 0, 0)
+	var stand: Vector3 = sup._find_ground(sup.radio_pos - to_r)
+	me.global_position = (stand if stand.is_finite() and absf(stand.y - sup.radio_pos.y) < 0.6 else sup.radio_pos) + Vector3.UP * 0.2
+	me.velocity = Vector3.ZERO
+	me.look_yaw = atan2(-to_r.x, -to_r.z)          # forward = (−sin yaw, 0, −cos yaw) → zum Funkgerät
+	m.controller.input_enabled = true
 	await get_tree().create_timer(1.0).timeout      # eigene Lage beim Server
-	check(sup._radio_node.can_interact(me), "Client: Funkgerät aufnehmbar (Benutzen)")
-	sup._radio_node.interact(me)
+	await wait_for(func(): return m.controller.interact_target == sup._radio_node, 5.0)
+	check(m.controller.interact_target == sup._radio_node, "Client: Benutzen-Ziel ist das Funkgerät (PlayerController.interact_target)",
+		str(m.controller.interact_target))
+	_action("interact")
 	await wait_for(func(): return sup.carrying(), 10.0)
-	check(sup.carrying(), "Client: Funkgerät getragen (vom Server bestätigt)")
-	check(sup.open_menu() and sup.menu_open, "Client: Untermenü „Unterst. anf.“ öffnet")
+	check(sup.carrying(), "Client: Funkgerät per Benutzen-Taste aufgenommen (vom Server bestätigt)")
 	var k := int(st["kind"])
-	check(sup.choose(k) and sup.targeting == k, "Client: Zielwahl")
 	var tp: Array = st["target"]
 	var bp: Array = st["pos"]
-	var away: Vector3 = sup._find_ground(Vector3(bp[0], bp[1], bp[2]) + Vector3(-45, 0, 0))
-	me.global_position = (away if away.is_finite() else Vector3(bp[0], bp[1] + 2.0, bp[2]) + Vector3(-45, 0, 0)) + Vector3.UP * 0.2
+	# Standort außerhalb des Wirkungsbereichs mit freier Sicht (Kamera hinter der Figur) auf das Ziel
+	var tgt0 := Vector3(tp[0], tp[1], tp[2])
+	# Alle Standorte mit freier Sicht sammeln; die tatsächliche Kamera (3. Person) entscheidet unten, welcher taugt
+	var aways: Array = []
+	for dist in [20.0, 25.0, 30.0]:
+		for dv in [Vector3(-1, 0, 0), Vector3(1, 0, 0), Vector3(0, 0, -1), Vector3(0, 0, 1), Vector3(-0.7, 0, -0.7), Vector3(0.7, 0, 0.7)]:
+			var g: Vector3 = sup._find_ground(tgt0 + dv * float(dist), false)
+			if not g.is_finite() or Vector2(g.x - tgt0.x, g.z - tgt0.z).length() < 18.0:
+				continue
+			var back: Vector3 = g - (tgt0 - g).normalized() * 3.0 + Vector3.UP * 2.2
+			if sup._ray(g + Vector3.UP * 1.7, tgt0 + Vector3.UP * 0.3).is_empty() and sup._ray(back, tgt0 + Vector3.UP * 0.3).is_empty():
+				aways.append(g)
+	if aways.is_empty():
+		var fb: Vector3 = sup._find_ground(Vector3(bp[0], bp[1], bp[2]) + Vector3(-30, 0, 0), false)
+		aways.append(fb if fb.is_finite() else Vector3(bp[0], bp[1] + 2.0, bp[2]) + Vector3(-30, 0, 0))
+	me.global_position = (aways[0] as Vector3) + Vector3.UP * 0.2
 	me.velocity = Vector3.ZERO
 	await get_tree().create_timer(1.0).timeout
-	sup.confirm_target(Vector3(tp[0], tp[1], tp[2]))
+	_action("command_all")
+	await get_tree().process_frame
+	check(sup.menu_open, "Client: Ziffernblock 0 öffnet „Unterst. anf.“")
+	_key(KEY_KP_1 + k)
+	await get_tree().process_frame
+	check(not sup.menu_open and sup.targeting == k, "Client: Ziffer %d wählt %s" % [k + 1, SupportStrike.NAME[k]])
+	# Blick auf das Ziel richten (Fadenkreuz), Vorschaukreis abwarten, Linksklick
+	var tgt := Vector3(tp[0], tp[1], tp[2])
+	for ai in aways.size():
+		if ai > 0:                                   # Kamera sah das Ziel nicht (Geländekante) → nächster Standort
+			me.global_position = (aways[ai] as Vector3) + Vector3.UP * 0.2
+			me.velocity = Vector3.ZERO
+			me.set_meta("_aim_corr", 0.0)
+		if await wait_for(func():
+				_aim_at(me, tgt)
+				return sup.target_preview.is_finite() and Vector2(sup.target_preview.x - tgt.x, sup.target_preview.z - tgt.z).length() < 6.0, 6.0):
+			break
+	_aim_at(me, tgt)
+	await get_tree().process_frame
+	check(sup.target_preview.is_finite() and is_instance_valid(sup._preview)
+		and Vector2(sup.target_preview.x - tgt.x, sup.target_preview.z - tgt.z).length() < 6.0,
+		"Client: Zielvorschau unter dem Fadenkreuz", "%s ↔ %s" % [sup.target_preview, tgt])
+	_click()
+	await get_tree().process_frame
+	check(sup.targeting == -1, "Client: Linksklick bestätigt das Ziel")
 	await wait_for(func(): return sup.markers_shown >= 1, 10.0)
 	check(sup.markers_shown >= 1 and sup.radio_state == 0, "Client: 3D-Kreis empfangen, Funkgerät verbraucht")
 	await wait_for(func(): return sup.booms >= 3, 12.0)

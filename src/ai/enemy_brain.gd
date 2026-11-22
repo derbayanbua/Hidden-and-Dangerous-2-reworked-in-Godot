@@ -209,11 +209,21 @@ func script_route(points: Array) -> void:
 ## (ARCTIC3 Killer); blockiert das Skript für die Dauer
 var _ill_fire_t := 0.0
 var _ill_target: Node3D
+var _ill_over := 0.0       ## 0.12.1: Nachlauf bis zum ersten Schuss (Stellung/Bordwaffe)
+var _ill_ammo0 := 0
+
+
+## Besetzte Stellung oder Waffensitz im Fahrzeug
+func _mounted_gun() -> bool:
+	return soldier.mounted != null or (soldier.vehicle != null and soldier.seat_index > 0)
 
 
 func script_ill_fire(t: Node3D, seconds: float) -> void:
 	_ill_target = t
 	_ill_fire_t = maxf(seconds, 0.1)
+	_ill_over = 0.0
+	var w0 := soldier.current_weapon()
+	_ill_ammo0 = w0.total_ammo() if w0 and _mounted_gun() else 0
 	stop_moving()
 	# B-051 [B]: nur echte IllFire-Aufträge (Controller +0xB4) – Geschosse fliegen durch Akteure (Ballistics.pass_actors)
 	soldier.set_meta("illfire_shots", attack_illfire)
@@ -225,6 +235,12 @@ func ill_fire_done() -> bool:
 
 func _ill_fire_tick(delta: float) -> void:
 	_ill_fire_t -= delta
+	# 0.12.1 [E]: Stellungs-/Bordschütze schießt mindestens einmal (NORMANDY x_n1_n43–47 HUMAN_Attack(shoot, 300): 300 ms
+	# endeten vor Ausrichten + erstem Schuss → Flak blieb stumm); höchstens 3 s Nachlauf
+	if _ill_fire_t <= 0.0 and _ill_over < 3.0 and _ill_ammo0 > 0 and is_instance_valid(_ill_target) and _mounted_gun() \
+			and soldier.current_weapon() and soldier.current_weapon().total_ammo() >= _ill_ammo0:
+		_ill_over += delta
+		_ill_fire_t = 0.0001
 	soldier.move_input = Vector3.ZERO
 	if not is_instance_valid(_ill_target) or _ill_fire_t <= 0.0:
 		_ill_fire_t = 0.0
