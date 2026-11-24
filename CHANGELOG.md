@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.12.3 (24.11.2026)
+
+**DE**
+- **Einzelspieler-KI nach dem Original:** Gegner laufen in Originalmissionen über das Original-Fußwegenetz der Karte
+  (Patrouillen, Rückweg zum Posten, Alarm- und Suchwege, Skriptwege, Flankieren und Nachrücken). Kurze Wege und Stellen
+  ohne Netz nutzen weiter das Navigationsnetz. Suchpunkte liegen auf Netzknoten.
+- **CZECH1:** Trebissky zu retten scheitert nicht mehr nach der Zwischensequenz. `HUMAN_KillEx` löst wie im Original
+  kein OnDeath aus.
+- **Tests:** neue Suite `test_sp_ki_wege`; der Erfüllbarkeitslöser schont Figuren, deren Tod ein Ziel scheitern lässt.
+
+**EN**
+- **Single player AI as in the original:** in original missions enemies walk along the map's original footpath network
+  (patrols, return to post, alarm and search routes, script routes, flanking and advancing). Short routes and spots without
+  a network still use the navigation mesh. Search points lie on network nodes.
+- **CZECH1:** rescuing Trebissky no longer fails after the cutscene. As in the original, `HUMAN_KillEx` does not
+  trigger OnDeath.
+- **Tests:** new suite `test_sp_ki_wege`; the completability solver spares figures whose death fails an objective.
+
 ## 0.12.2 (24.11.2026)
 
 **DE**

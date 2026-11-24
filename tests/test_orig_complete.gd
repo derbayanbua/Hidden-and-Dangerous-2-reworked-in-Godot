@@ -778,6 +778,59 @@ func _fail_senders() -> Array:
 	return out
 
 
+var _death_fail_cache = null
+
+
+## Akteure, deren OnDeath per SendSignal ein Skript erreicht, dessen OnSignal(n) ein Ziel scheitern lässt
+func _death_fails() -> Array:
+	if _death_fail_cache != null:
+		return _death_fail_cache
+	_death_fail_cache = []
+	var fail_re := RegEx.create_from_string("setobjectivestatus\\s*\\(\\s*\\d+\\s*,\\s*3\\s*\\)")
+	var sig_re := RegEx.create_from_string("^\\s*onsignal\\s*\\(\\s*(\\d+)\\s*\\)")
+	var hdr_re := RegEx.create_from_string("^\\s*(whenever|onsignal|ondeath|onalarm|onalarmdone|onuse|onhit|label)\\b")
+	var fail_sig := {}
+	for vm in rt.vms:
+		if not is_instance_valid(vm.me):
+			continue
+		var cur := -1
+		for ln in _src(vm.name).split("\n"):
+			var code := ln.split("//")[0]
+			var sm := sig_re.search(code)
+			if sm:
+				cur = int(sm.get_string(1))
+			elif hdr_re.search(code):
+				cur = -1
+			if cur >= 0 and fail_re.search(code):
+				var k := String(vm.me.name).to_lower()
+				if not fail_sig.has(k):
+					fail_sig[k] = {}
+				fail_sig[k][cur] = true
+	var ff_re := RegEx.create_from_string("frm_findframe\\s*\\(\\s*(\\w+)\\s*,\\s*\"([^\"]+)\"")
+	var send_re := RegEx.create_from_string("sendsignal\\s*\\(\\s*(\\w+)\\s*,\\s*(\\d+)\\s*\\)")
+	for vm in rt.vms:
+		if not (is_instance_valid(vm.me) and vm.me is Soldier):
+			continue
+		var src := _src(vm.name)
+		var frames := {}
+		for mt in ff_re.search_all(src):
+			frames[mt.get_string(1)] = mt.get_string(2).to_lower()
+		var in_death := false
+		for ln in src.split("\n"):
+			var code := ln.split("//")[0]
+			var hm := hdr_re.search(code)
+			if hm:
+				in_death = hm.get_string(1) == "ondeath"
+			if not in_death:
+				continue
+			for mt in send_re.search_all(code):
+				var tgt := String(frames.get(mt.get_string(1), ""))
+				if fail_sig.has(tgt) and fail_sig[tgt].has(int(mt.get_string(2))) and not _death_fail_cache.has(vm.me):
+					_death_fail_cache.append(vm.me)
+					print("LOESER schont %s (Tod lässt Ziel scheitern)" % vm.me.name)
+	return _death_fail_cache
+
+
 func _kill_fail_senders() -> void:
 	var lead := _lead()
 	for e in _fail_senders():
@@ -794,6 +847,8 @@ func _kill_enemies(spare_protected := false) -> void:
 		if is_instance_valid(e) and e.alive and not e.has_meta("hands_up"):
 			if spare_protected and prot.has(String(e.name).to_lower()):
 				continue
+			if _death_fails().has(e):
+				continue      # eigener Tod lässt ein Ziel scheitern (CZECH1 Trebissky)
 			e.die(lead)
 			n += 1
 	for d in get_tree().get_nodes_in_group("dogs"):

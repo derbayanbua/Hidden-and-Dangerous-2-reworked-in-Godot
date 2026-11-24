@@ -376,6 +376,102 @@ func _orig_rules() -> bool:
 	return runtime != null and not Net.is_online
 
 
+## SP-KI Laufwege (docs/status/sp_ki_original.md): Bewegungen über das Fußwegenetz (check2.bin Abschnitt 1, Welt+0x54).
+## Original [B]: Bewegungsvorbereitung 0x5656E0 liest den Bewegungspfad des Gehirns (vtable +0xD4 → Liste +0xE0); jeder
+## Pfadpunkt trägt eine Knotennummer (+0x20, u16) des Netzes Welt+0x54 → Laufwege sind Knotenfolgen im Fußwegenetz. Ohne
+## Pfad wird der aktuelle Knoten über 0x51D5C0(Lage, 5,0, −1) = nächster Knoten im Umkreis 5 m bestimmt [B].
+## Nachbau: Start/Ziel je auf den nächsten Knoten ≤ 5 m, kürzester Weg im Gesamtnetz (Grund- + Skriptkanten, AStar3D) [P
+## Suchverfahren], Wegstücke zwischen Knoten über das Navmesh [E]. Navmesh-Rückfall: kein Knoten in 5 m, keine Verbindung,
+## Umweg > 1,8 × Luftlinie + 15 m, Ziel < 12 m [E], Netz fehlt, Fahrzeug/Stellung. Nur Originalmissionen offline (MP-Bots und
+## Übungseinsätze haben kein runtime). `--ki_wege=0` = aus.
+const WALK_SNAP := 5.0          ## 0x51D5C0 Arg 0x40A00000 [B]
+const WALK_MIN_DIST := 12.0     ## [E]
+const WALK_DETOUR_K := 1.8      ## [E]
+var _walk_queue: Array = []     ## noch anzulaufende Knotenlagen (Ziel = _move_target)
+var walk_routes := 0            ## Zähler für Tests/Messung
+var walk_nodes_passed := 0
+
+
+static func walk_route_switch() -> bool:
+	return String(Game.cli.get("ki_wege", "1")) != "0"
+
+
+func walk_route_enabled() -> bool:
+	return _orig_rules() and walk_route_switch() and soldier != null and soldier.vehicle == null \
+			and soldier.mounted == null
+
+
+func walk_route_active() -> bool:
+	return not _walk_queue.is_empty()
+
+
+## Knotenlagen des Fußwegenetzes von a nach b (ohne a/b selbst); [] = Navmesh-Rückfall.
+func plan_walk_route(a: Vector3, b: Vector3) -> Array:
+	var net := OrigCombatFsm.walk_net(self)
+	if net == null:
+		return []
+	var flat := Vector2(b.x - a.x, b.z - a.z).length()
+	if flat < WALK_MIN_DIST:
+		return []
+	var na := net.nearest_node(a, WALK_SNAP)
+	var nb := net.nearest_node(b, WALK_SNAP)
+	if na < 0 or nb < 0 or na == nb:
+		return []
+	var r := net.route_nodes(na, nb)
+	if r.is_empty():
+		return []
+	var pts: Array = []
+	for k in r["nodes"]:
+		pts.append(net.base_pos[k])
+	# erster/letzter Knoten nicht „zurück“ anlaufen, wenn der nächste schon näher liegt
+	if pts.size() >= 2 and a.distance_to(pts[1]) < (pts[0] as Vector3).distance_to(pts[1]):
+		pts.pop_front()
+	if pts.size() >= 2 and b.distance_to(pts[pts.size() - 2]) < (pts[pts.size() - 1] as Vector3).distance_to(pts[pts.size() - 2]):
+		pts.pop_back()
+	var length := a.distance_to(pts[0]) + (pts[pts.size() - 1] as Vector3).distance_to(b)
+	for i in range(1, pts.size()):
+		length += (pts[i - 1] as Vector3).distance_to(pts[i])
+	if length > WALK_DETOUR_K * a.distance_to(b) + 15.0:
+		return []
+	return pts
+
+
+func move_to(pos: Vector3, mode: int = Soldier.MoveMode.WALK) -> void:
+	if not walk_route_enabled():
+		_walk_queue = []
+		super.move_to(pos, mode)
+		return
+	if not _walk_queue.is_empty() and _move_target.is_finite() and _move_target.distance_to(pos) < 0.5:
+		soldier.move_mode = mode     # gleiches Ziel: laufende Knotenfolge behalten
+		return
+	var same := _move_target.is_finite() and _move_target.distance_to(pos) < 0.5
+	super.move_to(pos, mode)
+	if same:
+		return
+	_walk_queue = plan_walk_route(soldier.global_position, pos)
+	if not _walk_queue.is_empty():
+		walk_routes += 1
+		agent.target_position = _walk_queue[0]
+		if Game.cli.has("debug_ki_wege"):
+			print("KI_WEG %s %d Knoten -> %s" % [soldier.name, _walk_queue.size(), str(pos)])
+
+
+func update_movement(delta: float, face_move := true) -> void:
+	if not _walk_queue.is_empty():
+		if not _move_target.is_finite() or agent.target_position.distance_to(_walk_queue[0]) > 0.05:
+			_walk_queue = []      # Ziel verworfen oder neu berechnet (Fortschrittswächter) → Navmesh
+		else:
+			var w: Vector3 = _walk_queue[0]
+			var p := soldier.global_position
+			if Vector2(w.x - p.x, w.z - p.z).length() < 1.5 and absf(w.y - p.y) < 2.5:
+				_walk_queue.pop_front()
+				walk_nodes_passed += 1
+				_prog_best = INF
+				_prog_t = 0.0
+				agent.target_position = _walk_queue[0] if not _walk_queue.is_empty() else _move_target
+	super.update_movement(delta, face_move)
+
+
 ## 0.11.7 AP-48e: Original-Zielfehler 0x5722B0 [B] nur mit Original-Regeln (`--orig_aim=0` = alte Formel)
 func orig_aim_enabled() -> bool:
 	return _orig_rules() and String(Game.cli.get("orig_aim", "1")) != "0"
@@ -1008,6 +1104,22 @@ var _flee_bad: Array = []
 ## an die Leine geklemmte Punkt oft auf der eigenen Stelle bzw. hinter einer Netzinsel → Soldat stand 15–40 s). Sonst
 ## Zufallspunkt im Leinengebiet um den Posten (wie 0x557D10 „Wegpunkt im Leinengebiet“ [B Ablauf, E Auswahl]).
 func _search_point() -> Vector3:
+	# SP-KI: Suchpunkte = Fußwegenetz-Knoten ≤ 10 m um den Suchort und in der Leine (Wegpunktsuche 0x557D10 [B Ablauf],
+	# Auswahl zufällig [E]); ohne Netz wie bisher Navmesh-Stichproben.
+	if walk_route_enabled():
+		var net := OrigCombatFsm.walk_net(self)
+		if net:
+			var cand: Array = []
+			for k in net.base_pos.size():
+				var q: Vector3 = net.base_pos[k]
+				if Vector2(q.x - investigate_pos.x, q.z - investigate_pos.z).length() <= 10.0 and _in_leash(q) \
+						and distance_to(q) > 2.5 and absf(q.y - investigate_pos.y) < 4.0:
+					cand.append(q)
+			cand.shuffle()
+			for q in cand.slice(0, 4):
+				var rp := reachable_point(q)
+				if rp.is_finite():
+					return rp
 	for k in 9:
 		var c := investigate_pos if k < 4 else (home_pos if k < 6 else soldier.global_position)
 		var rad := 10.0 if k < 4 else (minf(leash_radius(), 15.0) if k < 6 else 6.0)

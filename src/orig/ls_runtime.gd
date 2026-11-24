@@ -861,7 +861,11 @@ func call_api(vm: LsVM, fname: String, args: Array):
 				# B-036b: Skripttod – alten Schützen nicht stehen lassen (a3 r_ar3_kill_player.scr tötete sas_7, Bericht nannte
 				# fälschlich den letzten Kameraden-Treffer „durch sas_2“ als Ursache)
 				victim.last_attacker = null
-				victim.die(null)     # aus einem Objekt-/Dummy-Skript (z. B. AFRICA1 Flugzeug): Akteur stirbt
+				# 0.12.3 [B] hd2.exe 0x5A1C90: Todesart 0xE (HUMAN_KillEx) setzt nur Gesundheit 0 + Todesanimation und kehrt
+				# vor 0x41D920 (OnDeath) zurück → kein OnDeath (CZECH1 trebisky.scr entfernt sich nach der Zwischensequenz)
+				if fname == "HUMAN_KILLEX":
+					victim.set_meta("death_notified", true)
+				victim.die(null)    # aus einem Objekt-/Dummy-Skript (z. B. AFRICA1 Flugzeug): Akteur stirbt
 			return null
 		# --- Zwischensequenzen ---
 		"CSC_RUNCUTSCENE":

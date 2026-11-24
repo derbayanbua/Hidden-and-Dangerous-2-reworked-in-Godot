@@ -40,6 +40,7 @@ $suites = @(
   @{ name = "test_b035";     args = "--headless -- --mission=no1_leuchtturm --autoplay=test_b035" },   # B-035 Leuchtturm/Lightmaps/Gesichter/Wetter
   @{ name = "test_difficulty"; args = "--headless -- --mission=a1_blizzard --autoplay=test_difficulty" },
   @{ name = "test_alarm_orig"; args = "--headless -- --mission=a2_erkundung --autoplay=test_alarm_orig" },
+  @{ name = "test_sp_ki_wege"; args = "--headless -- --mission=a1_blizzard --autoplay=test_sp_ki_wege" },
   @{ name = "test_af1_defenders"; args = "--headless -- --mission=af1_spaghetti_airport --autoplay=test_af1_defenders" },
   @{ name = "test_script_systems"; args = "--headless -- --mission=a1_blizzard --autoplay=test_script_systems" },
   @{ name = "test_commands_orig"; args = "--headless -- --mission=a1_blizzard --autoplay=test_commands_orig" },

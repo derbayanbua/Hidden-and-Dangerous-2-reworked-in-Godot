@@ -648,6 +648,11 @@ static func walk_net(b: AIBrain) -> LsCheckpoints:
 	if rt == null or not is_instance_valid(rt):
 		return null
 	var cp = rt.get("checkpoints")
+	# SP-KI Laufwege: Netz wurde bisher erst mit HUMAN_Drive/Skriptkante geladen (LsRuntime._drive_load, einmalig) → hier
+	# laden, damit Laufwege/Flanke/Nachrücken/Leine es immer haben. `--ki_wege=0` = alter Stand (nur nach Skriptladung).
+	if cp is LsCheckpoints and (cp as LsCheckpoints).base_pos.is_empty() and EnemyBrain.walk_route_switch() \
+			and rt.has_method("_drive_load"):
+		rt._drive_load()
 	if cp is LsCheckpoints and not (cp as LsCheckpoints).base_pos.is_empty():
 		return cp
 	return null
