@@ -6,6 +6,10 @@ render_mode unshaded, cull_disabled, depth_draw_never, shadows_disabled, fog_dis
 
 uniform sampler2D panorama : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform bool south_enabled = true;
+// Südstreifen (panorama_south.png) statt Alpenband; Parameter ohne Zoom (natürlicher Maßstab, 120°)
+uniform bool far_south_enabled = false;
+uniform sampler2D far_south : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
+uniform vec4 far_south_p = vec4(0.7667,2.439,0.4775,0.5);
 uniform sampler2D far_north : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D far_east : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D far_west : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
@@ -16,6 +20,8 @@ uniform vec3 south_direction = vec3(0.817,0.0,0.576);
 uniform float panorama_repeats = 3.0;
 uniform vec3 ring_center = vec3(0.0,1.4,0.0);   // Kartenmitte auf Augenhöhe: Bildhorizont liegt dort
 uniform float daylight = 0.0;
+uniform float overcast = 0.0;     // Wetter: 0 = unverändert, 1 = geschlossene Wolkendecke
+uniform float rain_haze = 0.0;    // Wetter: Regendunst über der Fernkulisse
 uniform float night = 0.0;
 uniform vec3 sun_direction = vec3(-0.576,-0.035,0.817);
 uniform float zoom = 1.6;        // Bildwinkel-Vergrößerung Nord/Ost/West (waagrecht = senkrecht, unverzerrt)
@@ -102,12 +108,14 @@ void fragment() {
 	float d_n = wrap_angle(azimuth-3.1415927);
 	float d_w = wrap_angle(azimuth+1.5707963);
 	float us = 0.5+d_s/alps_zoom*panorama_repeats/6.28318530718;
-	float w_s = south_enabled ? sector_weight(d_s)*edge_fade(us) : 0.0;
+	if (far_south_enabled) us = far_south_p.w-d_s*far_south_p.z;
+	float w_s = (south_enabled || far_south_enabled) ? sector_weight(d_s)*edge_fade(us) : 0.0;
 	float w_e = sector_weight(d_e)*edge_fade(far_east_p.w-d_e/zoom*far_east_p.z);
 	float w_n = sector_weight(d_n)*edge_fade(far_north_p.w-d_n/zoom*far_north_p.z);
 	float w_w = sector_weight(d_w)*edge_fade(far_west_p.w-d_w/zoom*far_west_p.z);
 	w_s *= w_s; w_e *= w_e; w_n *= w_n; w_w *= w_w;
-	vec4 s = mountain_band(us,elevation/alps_zoom,horizon);
+	vec4 s = far_south_enabled ? far_band(far_south,far_south_p,d_s,elevation,horizon)
+			: mountain_band(us,elevation/alps_zoom,horizon);
 	// Alpenband zählt nur, wo es Berge zeigt: unter/neben der Bergkontur übernimmt das Land der Nachbarstreifen voll
 	// (sonst heller Dunstkeil an den Nähten Süd/Ost und Süd/West)
 	w_s *= smoothstep(0.0,0.5,s.a);
@@ -136,7 +144,10 @@ void fragment() {
 	vec3 forest = tint(vec3(0.16,0.20,0.13),horizon);
 	col = mix(forest,col,coverage);
 	coverage = max(coverage,fill);
-	coverage *= 1.0-smoothstep(top_fade*0.8,top_fade,elevation);
+	coverage *= 1.0-smoothstep(top_fade*0.92,top_fade,elevation);
+	// Wetter (weather.gd): Bewölkung entsättigt und dunkelt die Fernkulisse ab, Regendunst hebt sie an
+	float lum = dot(col,vec3(0.299,0.587,0.114));
+	col = mix(col,mix(vec3(lum*0.78),vec3(0.42,0.44,0.46)*max(daylight,0.15),rain_haze),clamp(overcast*0.6+rain_haze*0.4,0.0,1.0));
 	ALBEDO = col;
 	ALPHA = coverage;
 }

@@ -603,7 +603,7 @@ func apply_flicker() -> void:
 		return
 	var lamps: Array = tunnels.lamps
 	for i in lamps.size():
-		var l: OmniLight3D = lamps[i]
+		var l: Light3D = lamps[i]
 		if not is_instance_valid(l):
 			continue
 		var f := flicker(i, clock)

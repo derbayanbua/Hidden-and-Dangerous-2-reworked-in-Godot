@@ -531,7 +531,7 @@ func _update_interact_target() -> void:
 		if a >= 1.0 and not (d < 0.9 and a < PI * 0.5) and d >= 0.6:
 			continue
 		var s := interact_score(d, a)
-		if s < best_s:
+		if s < best_s and Interactable.sight_clear(active, it):      # nicht durch Decken/Wände
 			best_s = s
 			best = it
 	interact_target = best

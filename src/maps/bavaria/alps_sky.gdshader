@@ -6,6 +6,16 @@ uniform float panorama_repeats = 3.0;
 // sun_direction = Richtung zur Sonne (Abend-/Morgenrot auf ihrer Seite). Beide 0 = bisherige Abenddämmerung.
 uniform float daylight = 0.0;
 uniform float night = 0.0;
+uniform float overcast = 0.0;     // Wetter (weather.gd): 0 = klarer Himmel wie bisher, 1 = geschlossene Decke
+uniform float rain_haze = 0.0;    // Wetter: Regen-/Gewitterdunst
+uniform float cloud_time = 0.0;   // Wetter: Wolkenzug [s]
+float wx_hash(vec2 p) { return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
+float wx_noise(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	f = f*f*(3.0-2.0*f);
+	return mix(mix(wx_hash(i),wx_hash(i+vec2(1,0)),f.x),mix(wx_hash(i+vec2(0,1)),wx_hash(i+vec2(1,1)),f.x),f.y);
+}
 uniform vec3 sun_direction = vec3(-0.576,-0.035,0.817);
 
 float cloud_noise(vec2 p) {
@@ -181,9 +191,21 @@ void sky() {
 		vec3 mountains = (a.rgb*alpha_a+b.rgb*alpha_b)/max(coverage,0.00001);
 		result = mix(result,mountains,coverage);
 	}
+	if (overcast > 0.001) {
+		// Wetter (weather.gd): wandernde Wolkenfelder über dem Horizont, bei 1 geschlossene graue Decke
+		vec2 cp = ray.xz/max(ray.y+0.12,0.05)*0.9+vec2(cloud_time*0.012,cloud_time*0.004);
+		float cn = wx_noise(cp)*0.55+wx_noise(cp*2.1+3.7)*0.3+wx_noise(cp*4.3+9.1)*0.15;
+		float cover = smoothstep(1.0-overcast*1.15,1.25-overcast*0.85,cn)*smoothstep(-0.02,0.08,ray.y);
+		cover = max(cover,smoothstep(0.75,1.0,overcast)*smoothstep(-0.05,0.02,ray.y));
+		float lum = dot(result,vec3(0.299,0.587,0.114));
+		vec3 cloud = mix(vec3(0.58,0.60,0.63)*(0.25+0.75*daylight),vec3(0.03,0.035,0.05),night)*(1.0-0.45*rain_haze);
+		cloud *= 0.82+0.25*cn;
+		result = mix(result,cloud,cover*0.92);
+		result = mix(result,vec3(lum*0.8),overcast*0.35);
+	}
 	if (LIGHT0_ENABLED) {
 		// Licht 0 = Sonne bzw. nachts der Mond (gleiche Richtungsleuchte)
-		float disc = smoothstep(mix(0.9997,0.99993,night),mix(0.99995,0.99998,night),dot(ray,LIGHT0_DIRECTION));
+		float disc = (1.0-smoothstep(0.4,0.8,overcast))*smoothstep(mix(0.9997,0.99993,night),mix(0.99995,0.99998,night),dot(ray,LIGHT0_DIRECTION));
 		vec3 disc_color = mix(LIGHT0_COLOR*0.7,vec3(0.78,0.80,0.86),night);
 		result += disc_color*disc*smoothstep(0.0,0.025,ray.y);
 	}

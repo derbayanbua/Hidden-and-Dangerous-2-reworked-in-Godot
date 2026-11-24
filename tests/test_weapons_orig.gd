@@ -451,6 +451,19 @@ func _fpv_body(m: Mission, s: Soldier) -> void:
 	Input.action_release("aim")
 	await seconds(0.8)
 	check(s.model.fpv_body_mode == SoldierModel.FPV_BODY_LEGS and not s.model.fpv_leg_meshes().is_empty(), "Zielen beendet: Beine wieder sichtbar")
+	# 0.12.2: steil nach unten (stehend und geduckt) keine offene Beinkopie im Bild, nur Schatten
+	for st in [Soldier.Stance.STAND, Soldier.Stance.CROUCH]:
+		s.stance_request = st
+		s.look_pitch = deg_to_rad(-88.0)
+		await seconds(0.8)
+		check(s.model.fpv_body_mode == SoldierModel.FPV_BODY_SHADOW and s.model.fpv_leg_meshes().is_empty(),
+			"Blick nach unten (Haltung %d): Beinkopie ausgeblendet" % st, "Modus %d" % s.model.fpv_body_mode)
+		s.look_pitch = 0.0
+		await seconds(0.5)
+		check(s.model.fpv_body_mode == SoldierModel.FPV_BODY_LEGS and not s.model.fpv_leg_meshes().is_empty(),
+			"Blick geradeaus (Haltung %d): Beine wieder sichtbar" % st)
+	s.stance_request = Soldier.Stance.STAND
+	await seconds(0.5)
 	# Option aus: Figur ausgeblendet wie bisher
 	Settings.fpv_body = false
 	await seconds(0.3)

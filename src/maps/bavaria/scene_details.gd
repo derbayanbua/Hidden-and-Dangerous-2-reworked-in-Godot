@@ -3,6 +3,8 @@ extends RefCounted
 var m: Mission
 var lb: LevelBuilder
 var t: RefCounted
+const EzTree := preload("res://src/maps/bavaria/eztree.gd")
+const LibraryModels := preload("res://src/maps/bavaria/library_models.gd")
 var foliage: Array[Dictionary] = []
 var roof_stand := Vector3.ZERO
 var tree_stand := Vector3.ZERO
@@ -90,6 +92,23 @@ func _ladder(id: String, bottom: Vector3, top: Vector3, material: String) -> voi
 		m.dynamic_root.add_child(ladder)
 		ladder.global_position = top if upper else bottom
 		ladder.add_to_group("bavaria_scene_ladders")
+
+## KI-Navigation (11/2026): Plattformen liegen unter dynamic_root (keine Navmesh-Quelle). Eine reine Netzfläche
+## (LevelBuilder.NAV_ONLY_LAYER, ohne Kollision) auf Standhöhe unter static_root legt sie ins Netz; Mission._add_ladder_links
+## verbindet dann Leiterfuß und Austritt (NavigationLink3D, Meta „ladder“) → Bots erreichen Baumstand und Antennenplattform.
+func _nav_deck(id: String, xf: Transform3D, size: Vector2) -> void:
+	var body := StaticBody3D.new()
+	body.name = "NavDeck_" + id
+	body.collision_layer = LevelBuilder.NAV_ONLY_LAYER
+	body.collision_mask = 0
+	var cs := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(size.x, 0.1, size.y)
+	cs.shape = box
+	body.add_child(cs)
+	m.static_root.add_child(body)
+	body.global_transform = xf.translated_local(Vector3(0, -0.05, 0))
+	body.add_to_group("bavaria_nav_decks")
 
 func _tower() -> void:
 	var house := m.static_root.get_node("haus_18_shed") as Node3D
@@ -179,6 +198,9 @@ func _antenna_platform(support: Node3D, base: Vector3) -> void:
 	var bottom := support.to_global(base + Vector3(lx + 0.45, 0.0, 0.0))
 	var top := support.to_global(base + Vector3(0.95, y, 0.0))
 	antenna_stand = top
+	# Netzfläche nur im äußeren Streifen zwischen Turmbeinen (x ±0,42) und Leiteröffnung (x 1,3)
+	var dxf := support.global_transform * Transform3D(Basis(), base + Vector3(0.9, y, 0.0))
+	_nav_deck("antenne", dxf, Vector2(0.76, 1.9))
 	for upper in [false, true]:
 		var ladder := SceneLadder.new()
 		ladder.name = "antenne_leiter" + ("_oben" if upper else "_unten")
@@ -194,7 +216,9 @@ func _antenna_platform(support: Node3D, base: Vector3) -> void:
 
 func _sniper_tree() -> void:
 	var center := p(m.layout.sniper_tree.pixel)
-	var root := t.prop("l_tree",center,0,0.75) as Node3D
+	# Mit Bibliothek: EZ-Tree-Buche statt Originalbaum, Laubvorhang aus laubvorhang_cluster (--lib_models=0 = Original)
+	var lib_leaf: Node3D = LibraryModels.load_model("laubvorhang_cluster") if LibraryModels.enabled() and EzTree.enabled() else null
+	var root := t.prop("ez_beech_m" if lib_leaf else "l_tree",center,0,0.75) as Node3D
 	root.name = "SniperBaum"
 	root.add_to_group("bavaria_trees")
 	root.add_to_group("bavaria_sniper_tree")
@@ -205,7 +229,32 @@ func _sniper_tree() -> void:
 				canopy = mesh
 				break
 	# Hängende Original-Laubgruppen, unabhängig von der Stammkollision.
-	if canopy:
+	if lib_leaf:
+		var lb_bounds: AABB = t.mesh_bounds(lib_leaf,Transform3D.IDENTITY)
+		# Laubvorhang als räumliche Büschel statt flacher Karten (Sichtvolumen `foliage` unverändert)
+		if EzTree.clumps_enabled():
+			for lmi in lib_leaf.find_children("*","MeshInstance3D",true,false):
+				var mi3 := lmi as MeshInstance3D
+				if mi3.mesh != null:
+					mi3.mesh = EzTree.clump_mesh(mi3.mesh,mi3.mesh.get_aabb().get_center(),0.9,true,mi3.material_override)
+					mi3.material_override = null      # Materialien stecken jetzt in den Oberflächen
+		for i in 10:
+			var angle := TAU*float(i)/10.0
+			var low_skirt := i in [1,6]
+			var holder := Node3D.new()
+			m.dynamic_root.add_child(holder)
+			holder.position = center+Vector3(cos(angle)*3.2,0.3,sin(angle)*3.2)
+			holder.rotation.y = angle
+			holder.scale = Vector3(3.0/maxf(lb_bounds.size.x,0.1),(3.0 if low_skirt else 5.5)/maxf(lb_bounds.size.y,0.1),3.0/maxf(lb_bounds.size.z,0.1))
+			var leaf := lib_leaf.duplicate() as Node3D
+			holder.add_child(leaf)
+			leaf.position = -Vector3(lb_bounds.get_center().x,lb_bounds.position.y,lb_bounds.get_center().z)
+			holder.add_to_group("bavaria_ground_foliage")
+			holder.set_meta("foliage_index",foliage.size())
+			holder.set_meta("source",LibraryModels.DIR+"laubvorhang_cluster.glb")
+			foliage.append({"center":center+Vector3(cos(angle)*3.2,1.8 if low_skirt else 3.0,sin(angle)*3.2),"radius":Vector3(1.5,1.4 if low_skirt else 2.7,1.5)})
+		lib_leaf.free()
+	elif canopy:
 		var bounds: AABB = t.vertex_bounds(canopy,canopy.transform.affine_inverse())
 		for i in 10:
 			var angle := TAU*float(i)/10.0
@@ -232,6 +281,8 @@ func _sniper_tree() -> void:
 	for offset in [Vector3(-0.2,2.0,0),Vector3(0.3,1.5,-0.2)]:
 		_beam(wood,offset,Vector3(2.1,3.3,1.6),0.18,"darkwood",true)
 	tree_stand = center+Vector3(1.3,3.55,0.8)
+	# Netzfläche auf dem Aststand, Stamm (r 0,45) ausgespart
+	_nav_deck("baumstand", Transform3D(Basis(), center + Vector3(1.55, 3.5, 0.8)), Vector2(1.9, 2.4))
 	_ladder("Baumleiter",center+Vector3(2.3,0.05,0.8),tree_stand,"darkwood")
 	# Einzelbaum wird nicht mit dem allgemeinen Wald vereinigt.
 	root.remove_from_group("bavaria_trees")
@@ -261,7 +312,13 @@ func _hedge(a: Array, b: Array, height: float, width := 1.7) -> void:
 		var pos := from.lerp(to,(float(i)+0.5)/count)
 		if not m.woodland_clearance(pos,width+0.6):
 			continue
-		var shrub := t.prop("l_tree4",pos, float(i)*1.7,0.25) as Node3D
+		# Heckensträucher sind registrierte Baumwurzeln mit Stamm-Erdung/Wurzelansatz (test_bavaria_trees_lights):
+		# eigener Heckenstrauch mit Stamm-Mesh „tree“, mit --lib_models=0 der Originalstrauch.
+		var lib := LibraryModels.enabled()
+		var shrub := t.prop(LibraryModels.HEDGE if lib else "l_tree4",pos, float(i)*1.7,0.25) as Node3D
+		if shrub and lib and not shrub.is_in_group("bavaria_all_tree_roots"):
+			shrub.add_to_group("bavaria_all_tree_roots")
+			shrub.set_meta("species",LibraryModels.HEDGE)
 		if shrub:
 			var bounds: AABB = t.mesh_bounds(shrub,Transform3D.IDENTITY)
 			shrub.scale *= Vector3(width/maxf(bounds.size.x,0.1),height/maxf(bounds.size.y,0.1),width*1.8/maxf(bounds.size.z,0.1))
@@ -373,16 +430,34 @@ func _meadow_edges() -> void:
 		var ref := [385+i*7.1,527-i*6.4]
 		if not m.woodland_clearance(p(ref),1.0):
 			continue
+		if LibraryModels.enabled():
+			# Bibliotheks-Grasbüschel sind in Metern gebaut (0,3–0,7 m): keine 0,06-Skalierung
+			t.prop("lib:grasbueschel_%d" % (i % 4 + 1),p(ref),i*0.8,1.0)
+			continue
 		var grass := t.prop("l_tree4",p(ref),i*0.8,0.06) as Node3D
 		if grass:
 			grass.scale.y *= 0.7
 
 func _border_bush(pos: Vector3, yaw: float, height: float, parent: Node3D) -> Node3D:
 	if border_leaf_mesh == null:
-		var sample := t.prop("l_tree4",Vector3.ZERO,0,1.0) as Node3D
-		var crown := sample.find_child("Rectangle05",true,false) as MeshInstance3D
+		var crown: MeshInstance3D = null
+		var sample: Node3D = null
+		if LibraryModels.enabled():
+			# Laubkarten des Bibliotheksstrauchs (Alpha-Maske) statt der Original-Blattkarte von l_tree4
+			sample = t.prop("lib:strauch_sommer_2",Vector3.ZERO,0,1.0) as Node3D
+			if sample:
+				for mi in sample.find_children("*","MeshInstance3D",true,false):
+					var mat := (mi as MeshInstance3D).get_active_material(0) as BaseMaterial3D
+					if mat and mat.albedo_texture:
+						crown = mi
+						break
+		if crown == null:
+			if sample:
+				sample.visible = false
+			sample = t.prop("l_tree4",Vector3.ZERO,0,1.0) as Node3D
+			crown = sample.find_child("Rectangle05",true,false) as MeshInstance3D
 		border_leaf_mesh = crown.mesh
-		border_leaf_material = crown.material_override
+		border_leaf_material = crown.material_override if crown.material_override else crown.get_active_material(0)
 		border_leaf_transform = crown.global_transform
 		sample.visible = false
 	var root := Node3D.new()
@@ -532,9 +607,13 @@ func _boundary_screen() -> void:
 				var pos := along+outward*8.0
 				if vista_cut(pos):
 					continue
-				var tree := t.prop("l_tree" if i%2==0 else "l_tree2",Vector3(pos.x,-0.25,pos.y),0,0.8) as Node3D
+				var bkey := "l_tree" if i%2==0 else "l_tree2"
+				if EzTree.enabled():
+					bkey = "ez_spruce_m" if i%3!=1 else "ez_beech_m"     # Außenbereich: Nadelwald dominant
+				var tree := t.prop(bkey,Vector3(pos.x,-0.25,pos.y),0,0.8) as Node3D
 				var bounds: AABB = t.mesh_bounds(tree,Transform3D.IDENTITY)
-				tree.scale *= Vector3(6.0/maxf(bounds.size.x,0.1),(9.0+i%3)/maxf(bounds.size.y,0.1),6.0/maxf(bounds.size.z,0.1))
+				tree.scale *= ez_tree_scale(bkey,bounds.size,6.0,9.0+i%3)
+				_use_lod(tree,2)
 				tree.rotation.y = yaw
 				tree.reparent(root,true)
 				tree.add_to_group("bavaria_exterior_foliage")
@@ -565,6 +644,8 @@ func _outer_forest_ring(center: Vector2) -> void:
 	m.dynamic_root.add_child(root)
 	root.add_to_group("bavaria_outer_forest_ring")
 	var species := ["l_tree","l_tree2","l_tree"]
+	if EzTree.enabled():
+		species = ["ez_spruce_m","ez_spruce_l","ez_beech_l","ez_spruce_m","ez_birch_l"]
 	for edge in m.boundary.size():
 		var a: Vector2 = m.boundary[edge]
 		var b: Vector2 = m.boundary[(edge+1)%m.boundary.size()]
@@ -597,7 +678,8 @@ func _outer_forest_ring(center: Vector2) -> void:
 				continue
 			var bounds: AABB = t.mesh_bounds(tree,Transform3D.IDENTITY)
 			var h := 10.0+2.0*absf(sin(i*0.77+edge))
-			tree.scale *= Vector3(6.5/maxf(bounds.size.x,0.1),h/maxf(bounds.size.y,0.1),6.5/maxf(bounds.size.z,0.1))
+			tree.scale *= ez_tree_scale(key,bounds.size,6.5,h)
+			_use_lod(tree,2)
 			tree.rotation.y = i*1.31+edge
 			tree.reparent(root,true)
 			tree.add_to_group("bavaria_exterior_foliage")
@@ -605,6 +687,8 @@ func _outer_forest_ring(center: Vector2) -> void:
 			for mesh in tree.find_children("*","MeshInstance3D",true,false):
 				(mesh as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 				_outer_visibility(mesh)
+			if FAR_RING_IMPOSTOR:
+				_add_impostor(tree,key)
 			for body in tree.find_children("*","CollisionObject3D",true,false):
 				body.collision_layer = 0
 				body.collision_mask = 0
@@ -628,6 +712,8 @@ const OUTER_VIS_MARGIN := 40.0
 func _outer_forest_dense(center: Vector2) -> void:
 	var poly := PackedVector2Array(m.boundary)
 	var species := ["l_tree","l_tree2","l_tree4"]
+	if EzTree.enabled():
+		species = ["ez_spruce_m","ez_spruce_l","ez_birch_l"]     # gleiche Artenzahl → gleiche Blockzahl/Zeichenaufrufe
 	var parts := {}        # Art → [[Mesh, rel. Transform], …]
 	var sizes := {}
 	var base_lift := {}    # Art → Stammfußhöhe in Modelleinheiten (nur l_tree2 ≠ 0)
@@ -696,7 +782,7 @@ func _outer_forest_dense(center: Vector2) -> void:
 				var sz: Vector3 = sizes[key]
 				var h := 10.5+2.5*absf(sin(i*0.61+edge+row*1.7))+1.0*row
 				var w := 6.2+0.8*absf(cos(i*0.9+row))
-				var basis := Basis(Vector3.UP,i*1.13+edge*0.7+row)*Basis.from_scale(Vector3(w/maxf(sz.x,0.1),h/maxf(sz.y,0.1),w/maxf(sz.z,0.1)))
+				var basis := Basis(Vector3.UP,i*1.13+edge*0.7+row)*Basis.from_scale(ez_tree_scale(key,sz,w,h))
 				# Stammfuß wie ground_vegetation auf den Außenboden (−0,30 m) und 4,5 cm eingesenkt.
 				var foot_y := -0.345-float(base_lift.get(key,0.0))*h/maxf(sz.y,0.1)
 				xforms[ck].append(Transform3D(basis,Vector3(pos.x,foot_y,pos.y)))
@@ -733,7 +819,7 @@ func _outer_forest_dense(center: Vector2) -> void:
 			var sz: Vector3 = sizes[key]
 			var h := 11.0+3.0*absf(sin(j*0.61+ring_i*1.3))
 			var w := 6.4+1.0*absf(cos(j*0.9+ring_i))
-			var basis := Basis(Vector3.UP,j*1.13+ring_i)*Basis.from_scale(Vector3(w/maxf(sz.x,0.1),h/maxf(sz.y,0.1),w/maxf(sz.z,0.1)))
+			var basis := Basis(Vector3.UP,j*1.13+ring_i)*Basis.from_scale(ez_tree_scale(key,sz,w,h))
 			var foot_y := -0.345-float(base_lift.get(key,0.0))*h/maxf(sz.y,0.1)
 			xforms[ck].append(Transform3D(basis,Vector3(pos.x,foot_y,pos.y)))
 			outer_extended_count += 1
@@ -743,6 +829,7 @@ func _outer_forest_dense(center: Vector2) -> void:
 	root.name = "AeussererWaldDicht"
 	m.dynamic_root.add_child(root)
 	root.add_to_group("bavaria_outer_forest_dense")
+	var imp_lists := {}      # "Art|Kante" → Lagen der hinteren Reihen (Impostor)
 	for ck in xforms:
 		var list: Array = xforms[ck]
 		if list.is_empty():
@@ -752,10 +839,18 @@ func _outer_forest_dense(center: Vector2) -> void:
 		outer_dense_count += list.size()
 		if far_tier:
 			outer_dense_far_count += list.size()
+		if far_tier and EzTree.has_impostor(key):
+			# Hintere Reihen (≥ FAR_TIER_DEPTH außerhalb, nie aus der Nähe zu sehen): nur Kreuz-Billboard, je Art und Kante
+			# ein MultiMesh (wenige Zeichenaufrufe, ohne Schatten).
+			var ik := key+"|"+String(ck).get_slice("|",1)
+			if not imp_lists.has(ik):
+				imp_lists[ik] = []
+			imp_lists[ik].append_array(list)
+			continue
 		for part in parts[key]:
 			var batch := MultiMesh.new()
 			batch.transform_format = MultiMesh.TRANSFORM_3D
-			batch.mesh = t.tree_far_mesh(part[0]) if far_tier else part[0]
+			batch.mesh = t.tree_far_mesh(part[0]) if far_tier else t.tree_near_mesh(part[0])
 			batch.instance_count = list.size()
 			for k in list.size():
 				batch.set_instance_transform(k,(list[k] as Transform3D)*(part[1] as Transform3D))
@@ -770,10 +865,75 @@ func _outer_forest_dense(center: Vector2) -> void:
 				part_xf.append((list[k] as Transform3D)*(part[1] as Transform3D))
 			keep_xforms(visual, part_xf)
 			root.add_child(visual)
+	for ik in imp_lists:
+		var list: Array = imp_lists[ik]
+		var ibatch := MultiMesh.new()
+		ibatch.transform_format = MultiMesh.TRANSFORM_3D
+		ibatch.mesh = EzTree.impostor_mesh(String(ik).get_slice("|",0))
+		ibatch.instance_count = list.size()
+		for k in list.size():
+			ibatch.set_instance_transform(k, list[k] as Transform3D)
+		var iv := MultiMeshInstance3D.new()
+		iv.name = "WaldFern_"+String(ik).replace("|","_")
+		iv.multimesh = ibatch
+		iv.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		iv.add_to_group("bavaria_tree_impostors")
+		keep_xforms(iv, list)
+		root.add_child(iv)
 	print("BAVARIA_WALD dicht=%d (hinten HD %d, Bloecke %d) texturen=%s" % [outer_dense_count, outer_dense_far_count,
 		root.get_child_count(), str(t.tree_tex_stats)])
 
 var outer_extended_count := 0
+
+## Skalierung eines Außenbaums auf Breite w / Höhe h. EZ-Tree-Bäume gleichmäßig (Wuchsform bleibt), Originalbäume
+## wie bisher getrennt nach Breite/Höhe.
+func ez_tree_scale(key: String, sz: Vector3, w: float, h: float) -> Vector3:
+	if EzTree.is_key(key):
+		# gleichmäßig, Kronenbreite aber höchstens w (wie bisher) – Blickschneise/Randkulisse bleiben gleich licht
+		var s := h/maxf(sz.y,0.1)
+		var sxz := minf(s, w/maxf(maxf(sz.x,sz.z),0.1))
+		return Vector3(sxz,s,sxz)
+	return Vector3(w/maxf(sz.x,0.1),h/maxf(sz.y,0.1),w/maxf(sz.z,0.1))
+
+## Gürtelbäume (17–22 m außerhalb, aus der Nähe sichtbar): 3D nah, Fern-Impostor ab IMPOSTOR_DIST (gemessen: ohne ihn
+## mehr Zeichenaufrufe, da fern 1 statt 2 Meshes je Baum).
+const FAR_RING_IMPOSTOR := true
+
+## 3D-Baum nur bis zur Impostor-Entfernung (weich ausblenden).
+func _near_visibility(gi: GeometryInstance3D) -> void:
+	gi.visibility_range_end = EzTree.IMPOSTOR_DIST
+	gi.visibility_range_end_margin = EzTree.IMPOSTOR_FADE
+	gi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+
+## Impostor ab der Impostor-Entfernung bis zur Außen-Sichtweite.
+func _far_visibility(gi: GeometryInstance3D) -> void:
+	gi.visibility_range_begin = EzTree.IMPOSTOR_DIST
+	gi.visibility_range_begin_margin = EzTree.IMPOSTOR_FADE
+	gi.visibility_range_end = OUTER_VIS_END
+	gi.visibility_range_end_margin = OUTER_VIS_MARGIN
+	gi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+
+## Gürtelbaum (Einzelknoten): 3D nah, Kreuz-Billboard fern (Kind „Impostor“, ohne Schatten).
+func _add_impostor(tree: Node3D, key: String) -> void:
+	var imp := EzTree.impostor_mesh(key)
+	if imp == null:
+		return
+	for mi in tree.find_children("*","MeshInstance3D",true,false):
+		_near_visibility(mi)
+	var iv := MeshInstance3D.new()
+	iv.name = "Impostor"
+	iv.mesh = imp
+	iv.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_far_visibility(iv)
+	iv.add_to_group("bavaria_tree_impostors")
+	var content := tree.get_child(0) as Node3D      # Vorlagenkopie (Stammfuß-Versatz wie die Baummeshes)
+	(content if content else tree).add_child(iv)
+
+## EZ-Tree-Bäume außerhalb der Spielfläche: LOD-Stufe statt voller Geometrie.
+func _use_lod(tree: Node3D, level: int) -> void:
+	for mi in tree.find_children("*","MeshInstance3D",true,false):
+		(mi as MeshInstance3D).mesh = EzTree.lod_mesh((mi as MeshInstance3D).mesh,level)
+
 func _nearest_edge(pt: Vector2) -> int:
 	var best := 0
 	var bd := INF
@@ -820,9 +980,11 @@ func _batch_hedges() -> void:
 	var sources: Array[MeshInstance3D] = []
 	for hedge in m.get_tree().get_nodes_in_group("bavaria_hedges"):
 		for mesh in hedge.find_children("*","MeshInstance3D",true,false):
-			var key := str(mesh.mesh.get_instance_id())+":"+str(mesh.material_override.get_instance_id() if mesh.material_override else 0)
+			# Eigenmodelle tragen ihr Material als Flächen-Override (Vertexfarben) statt material_override.
+			var material: Material = mesh.material_override if mesh.material_override else mesh.get_surface_override_material(0)
+			var key := str(mesh.mesh.get_instance_id())+":"+str(material.get_instance_id() if material else 0)
 			if not batches.has(key):
-				batches[key] = {"mesh":mesh.mesh,"material":mesh.material_override,"transforms":[]}
+				batches[key] = {"mesh":mesh.mesh,"material":material,"transforms":[]}
 			batches[key].transforms.append(mesh.global_transform)
 			sources.append(mesh)
 	for data in batches.values():

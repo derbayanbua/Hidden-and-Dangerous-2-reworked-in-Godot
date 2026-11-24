@@ -35,6 +35,20 @@ assets/maps/bavaria/**/*.jpg
 !assets/maps/bavaria/panorama/**/*.png
 !assets/maps/bavaria/panorama/**/*.png.import
 assets/maps/bavaria/panorama/source/
+# Bäume aus EZ-Tree (MIT) mit CC0-Rinden bzw. eigenen Texturen: frei weitergebbar, daher öffentlich.
+!assets/maps/bavaria/trees_eztree/
+!assets/maps/bavaria/trees_eztree/*.png
+!assets/maps/bavaria/trees_eztree/*.png.import
+!assets/maps/bavaria/trees_eztree/*.jpg
+!assets/maps/bavaria/trees_eztree/*.jpg.import
+# Projekteigene, selbst erstellte Bibliotheks-Assets (frei nutzbar): öffentlich.
+!assets/maps/bavaria/library/
+!assets/maps/bavaria/library/**/*.png
+!assets/maps/bavaria/library/**/*.png.import
+!assets/maps/bavaria/library/**/*.jpg
+!assets/maps/bavaria/library/**/*.jpg.import
+!assets/maps/bavaria/library/**/*.glb
+!assets/maps/bavaria/library/**/*.glb.import
 assets/maps/bavaria/facade/SOURCES.json
 assets/maps/bavaria/roof_antenna/SOURCE_README.md
 assets/ui/mp_maps/bav*
@@ -50,6 +64,10 @@ werkzeuge/
 # Agenten-/Entwicklungsdokumentation nur lokal ([D] 24.10.2026)
 docs/*
 !docs/screenshots/
+
+# Eigene Karten: Arbeitsordner und exportierte .pck (lokal)
+/custom_maps/
+/maps/
 CLAUDE.md
 
 # Masterserver bleibt lokal ([D] 10.11.2026)

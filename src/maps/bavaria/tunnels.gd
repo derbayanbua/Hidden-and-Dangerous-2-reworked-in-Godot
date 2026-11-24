@@ -47,6 +47,19 @@ const ENTRANCES := [
 	{"id": "reihenhaus", "building": "reihe_40_0", "top": Vector2(2.29, 3.05), "dir": Vector2(0, 1), "width": 0.85,
 		"rise": 0.25, "run": 0.25, "inside": true},
 ]
+## Ausbau 2 (11/2026): weitere Zugänge im Gelände, Weltlage (x, z) des Kopfes und Abstiegsrichtung zum Gang hin.
+## Ein gerader Stichgang verbindet den Fuß mit dem nächsten Gang in Laufrichtung.
+##   nest   – Treppe aus einem MG-Nest (Sandsack-Brustwehr, bedienbares MG42, Durchgang seitlich frei)
+##   rubble – eingestürzter Gangteil: Trichter mit Schuttrampe (≈ 27°), Erde, Balken
+##   hatch  – Bodenluke (zweiflügelig, offen) mit steiler Treppe im Maß der Haustreppen
+const EXTRA_SITES := [
+	{"id": "mg_nest", "kind": "nest", "top": Vector2(-24.04, -43.41), "dir": Vector2(-0.616242, 0.787557), "width": 1.2, "rise": 0.19, "run": 0.27,
+		"inside": false, "rim": 0.45},
+	{"id": "einsturz", "kind": "rubble", "top": Vector2(-13.43, 8.05), "dir": Vector2(0.630582, -0.776123), "width": 1.6, "length": 7.5, "inside": false},
+	{"id": "luke", "kind": "hatch", "top": Vector2(-35.35, -3.15), "dir": Vector2(0.807135, -0.590368), "width": 0.85, "rise": 0.25, "run": 0.25,
+		"inside": false, "rim": 0.06},
+]
+const NEST_GUN_S := -2.3          ## MG-Drehpunkt vor dem Treppenkopf (gegen die Abstiegsrichtung)
 const HOUSE_FLOOR_TOP := 0.05
 const X_AXIS := Vector2(0.576, 0.817)          ## wie bavaria.gd (Lageplan → Welt)
 const Z_AXIS := Vector2(-0.817, 0.576)
@@ -55,7 +68,7 @@ var root: Node3D
 var entrances := {}               ## id → Daten (Weltpunkte, siehe _entrance_data)
 var nodes := {}                   ## Netzknoten (Weltlage x/z)
 var segments: Array = []          ## [Vector2, Vector2] Stollenachsen
-var lamps: Array[OmniLight3D] = []
+var lamps: Array[Light3D] = []    ## Stollenlampen (SpotLight nach unten; Vergleichsmodus OmniLight)
 var removed_furniture: Array[String] = []
 var chains: Array = []            ## Gangachsen (PackedVector2Array): 0 MG42→Abzweig, 1 →Antennenhaus, 2 →Reihenhaus, 3 Stichgang
 var rooms: Array = []             ## kleine Räume {id, c, t, n, w, d, chain, s, junction, mouth, poly}
@@ -63,12 +76,38 @@ var secret := {}                  ## Geheimraum hinter der Stahltür (gleiche Fe
 var wide_spots: Array = []        ## Ausbrüche {p, t, poly}
 var digit_spots: Array = []       ## Ziffern-Fundorte unter Tage / an den Treppen {digit, order, pos, normal, place}
 var decor_count := 0
+var extra := {}                   ## Ausbau 2: id → {kind, top, bottom, join, out, u3, ci, s, …} (siehe _build_extras)
+var nest_gun: OrigInteractive.OrigEmplacement   ## MG42 im Nest (gleiche Bedienung/MP wie das MG im Holzhaus)
 var _mouth_pts: Array = []
 var _blockers: Array = []         ## Grundrisse, unter denen kein Gang liegen darf (Keller Haus 16)
 var _stair_lines: Array = []      ## [Treppenkopf, Treppenfuß, id] (Welt 2D)
 var _tris: Array = []             ## Sohle/Decke: [a, b, c, fa, fb, fc, ca, cb, cc]
 var _occupied: Array = []         ## Räume/Ausbrüche (Abstandsprüfung)
 var _mats := {}
+var frame_mat := "darkwood"       ## Stützrahmen (Pack 09 stuetzholz_alt, sonst darkwood)
+const LIB_DIR := "res://assets/maps/bavaria/library/"
+const LibraryModels := preload("res://src/maps/bavaria/library_models.gd")
+const Placement := preload("res://src/maps/bavaria/field_emplacement.gd")
+
+## Bibliothekstextur (Albedo/Normal/Rauheit) als LevelBuilder-Material; fehlt sie oder --lib_tex=0: Rückfallschlüssel.
+func _library_mat(lb: LevelBuilder, key: String, base: String, scale: float, fallback: String, tint := Color.WHITE) -> String:
+	if String(Game.cli.get("lib_tex", "9")) == "0" or not ResourceLoader.exists(LIB_DIR + base + "_albedo.png"):
+		return fallback
+	if not lb._mats.has(key):
+		var mt := StandardMaterial3D.new()
+		mt.albedo_texture = load(LIB_DIR + base + "_albedo.png")
+		mt.albedo_color = tint
+		mt.normal_enabled = true
+		mt.normal_texture = load(LIB_DIR + base + "_normal.png")
+		mt.normal_scale = 0.7
+		mt.roughness_texture = load(LIB_DIR + base + "_roughness.png")
+		mt.roughness_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_RED
+		mt.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+		mt.uv1_triplanar = true
+		mt.uv1_world_triplanar = true
+		mt.uv1_scale = Vector3.ONE * scale
+		lb._mats[key] = mt
+	return key
 
 # --- Geometrie aus dem Lageplan (vor dem Hausbau nutzbar) --------------------------------------------------
 
@@ -127,7 +166,39 @@ static func hole_polygons(m) -> Array:
 			continue
 		var dims := stair_dims(e)
 		out.append(_to_world(f[0], _local_rect(e, 0.0, dims.open, float(e.width) * 0.5)))
+	for e0 in EXTRA_SITES:
+		var e := extra_site(e0)
+		out.append(_local_rect(e, 0.0, extra_open(e), float(e.width) * 0.5))
 	return out
+
+## Zusatzzugang mit normierter Richtung (Weltlage, ohne Gebäuderahmen)
+static func extra_site(e0: Dictionary) -> Dictionary:
+	var e := e0.duplicate()
+	e.dir = (e0.dir as Vector2).normalized()
+	return e
+
+## Offene Länge eines Zusatzzugangs (Loch im Gelände) ab dem Kopf
+static func extra_open(e: Dictionary) -> float:
+	return float(e.length) if String(e.kind) == "rubble" else float(stair_dims(e).open)
+
+## Freigehaltenes Schussfeld vor dem MG-Nest (Trapez, 16 m weit, öffnet sich auf ±5 m) – Hecken dort nicht gepflanzt
+static func fire_lanes() -> Array:
+	var out: Array = []
+	for e0 in EXTRA_SITES:
+		if String(e0.kind) == "nest":
+			var e := extra_site(e0)
+			out.append(PackedVector2Array([_local_rect(e, NEST_GUN_S - 1.0, NEST_GUN_S - 1.0, 1.8)[0], _local_rect(e, NEST_GUN_S - 17.0, NEST_GUN_S - 17.0, 5.0)[0],
+				_local_rect(e, NEST_GUN_S - 17.0, NEST_GUN_S - 17.0, 5.0)[3], _local_rect(e, NEST_GUN_S - 1.0, NEST_GUN_S - 1.0, 1.8)[3]]))
+	return out
+
+## Grundriss an der Oberfläche (Loch + Brustwehr/Rand) eines Zusatzzugangs
+static func extra_surface(e: Dictionary) -> PackedVector2Array:
+	match String(e.kind):
+		"nest":
+			return _local_rect(e, NEST_GUN_S - 1.4, extra_open(e) + 0.3, 2.0)
+		"rubble":
+			return _local_rect(e, -1.0, extra_open(e) + 0.5, float(e.width) * 0.5 + 0.85)
+	return _local_rect(e, -0.4, extra_open(e) + 0.3, float(e.width) * 0.5 + 0.7)
 
 ## Grundrisse für Deko-/Vegetationsabstand: Grube im Gelände samt Brüstung
 static func footprints(m) -> Array:
@@ -140,6 +211,8 @@ static func footprints(m) -> Array:
 			continue
 		var dims := stair_dims(e)
 		out.append(_to_world(f[0], _local_rect(e, -0.4, dims.open + 0.3, float(e.width) * 0.5 + PLANK + 0.35)))
+	for e0 in EXTRA_SITES:
+		out.append(extra_surface(extra_site(e0)))
 	return out
 
 # --- Bau ----------------------------------------------------------------------------------------------------
@@ -176,6 +249,11 @@ func build(m) -> void:
 		polys.append(PackedVector2Array([b - v, far - v, far + v, b + v]))
 		mouths.append({"b": b, "u": u, "half": float(e.width) * 0.5, "top_cover": COVER_Y})
 		segments.append([b, stub_end])
+		# Massiver Block unter dem Stollenansatz (Sohle dort = FLOOR_Y, Gefälle erst ab 3 m): die Sohle selbst ist ein
+		# dünnes Dreiecksnetz – wer einige cm darunter versetzt wird, fällt sonst durch (siehe Treppensohle).
+		var sc := (b + far) * 0.5
+		lb.box(Vector3(sc.x, NAV_ANCHOR_Y, sc.y), Vector3(b.distance_to(far), FLOOR_Y - NAV_ANCHOR_Y - 0.002, WIDTH),
+			mud, atan2(-u.y, u.x), true, root).name = "Sohlenblock_" + String(e.id)
 		entrances[String(e.id)] = _entrance_data(e, dims, xf, b)
 		_mouth_pts.append(b)
 		var top3: Vector3 = xf * Vector3(e.top.x, 0, e.top.y)
@@ -195,21 +273,26 @@ func build(m) -> void:
 		_add_wide_spots(polys)
 		_place_secret(m, polys)
 		_place_rooms(m, polys)
+		_build_extras(m, polys, mouths, wood, mud)   # nach Räumen/Geheimraum: deren Lage bleibt unverändert
 	var outline := _union(polys)
 	# Höhenraster-Anker: Der Navmesh-Bake rastert die Höhe ab der tiefsten Kollisionsgeometrie (Zelle 0,2 m). Der
 	# Stollen verschiebt dieses Minimum; der Anker legt es so, dass das Höhenraster der übrigen Karte unverändert bleibt
 	# (sonst verlagern sich Netzhöhen in den Häusern um ≈ 0,1 m).
 	var anchor_c: Vector2 = segments[0][0] if not segments.is_empty() else Vector2.ZERO
 	m.lb.box(Vector3(anchor_c.x, NAV_ANCHOR_Y, anchor_c.y), Vector3(0.1, 0.05, 0.1), mud, 0.0, true, root).name = "NavRasterAnker"
-	_floor_ceiling(m, outline, mud, wood)
-	_walls(m, outline, mouths, wood)
+	# Pack 09: eigene Stollenmaterialien (altes Stützholz, nasser Schlamm), nur Optik; --lib_tex=0 = bisherige Materialien
+	var tun_wood := _library_mat(lb, "stollen_holz", "stollen_stuetzholz_alt", 0.55, wood)
+	var tun_mud := _library_mat(lb, "stollen_sohle", "stollen_schlamm_nass", 0.4, mud)
+	frame_mat = _library_mat(lb, "stollen_rahmen", "stollen_stuetzholz_alt", 0.8, "darkwood", Color(0.62, 0.55, 0.48))
+	_floor_ceiling(m, outline, tun_mud, tun_wood)
+	_walls(m, outline, mouths, tun_wood)
 	_frames_and_lamps(m)
 	_decorate(m, wood, mud)
 	root.set_meta("entrances", entrances)
 	root.set_meta("nodes", nodes)
 	root.set_meta("outline", outline)
-	print("BAVARIA STOLLEN: %d Einstiege, %d Abschnitte, %.0f m Stollen, %d Lampen, %d Räume + Geheimraum %s, %d Ausbrüche, %d Deko, Möbel verlegt: %s" % [
-		entrances.size(), segments.size(), total_length(), lamps.size(), rooms.size(), str(not secret.is_empty()),
+	print("BAVARIA STOLLEN: %d Einstiege + %d Zusatzzugänge %s, %d Abschnitte, %.0f m Stollen, %d Lampen, %d Räume + Geheimraum %s, %d Ausbrüche, %d Deko, Möbel verlegt: %s" % [
+		entrances.size(), extra.size(), str(extra.keys()), segments.size(), total_length(), lamps.size(), rooms.size(), str(not secret.is_empty()),
 		wide_spots.size(), decor_count, str(removed_furniture)])
 
 func total_length() -> float:
@@ -296,9 +379,14 @@ func _build_stair(m, e: Dictionary, dims: Dictionary, xf: Transform3D, w: float,
 	ramp.set_meta("slope_deg", rad_to_deg(atan2(drop_y, dims.length)))
 	var ext: float = dims.length + LANDING
 	var sole: Vector2 = at.call(ext * 0.5, 0.0)
-	lb.box(Vector3(sole.x, FLOOR_Y - 0.1, sole.y), Vector3(ext + 0.3, 0.1, float(e.width) + 2 * PLANK), mud, yaw, true, holder)
+	# Sohle unter Treppe/Austritt als massiver Block bis NAV_ANCHOR_Y (0,3 m statt 0,1 m): Eine Figur, die mit der
+	# Kapselunterseite einige cm in der Sohle landet (Notversatz BotNav.nudge auf einen Netzpunkt, Step-down, Netzkorrektur),
+	# wurde bei 0,1 m Dicke nach UNTEN aus dem Block gedrückt und fiel ins Leere (Bot-Messlauf: Reihenhaus-Treppenfuß).
+	# Unterkante = tiefster Kollisionspunkt (NavRasterAnker) → Höhenraster des Navmesh unverändert.
+	var sole_h := FLOOR_Y - NAV_ANCHOR_Y
+	lb.box(Vector3(sole.x, NAV_ANCHOR_Y, sole.y), Vector3(ext + 0.3, sole_h, float(e.width) + 2 * PLANK), mud, yaw, true, holder)
 	# Seitliche Verschalung: offener Teil bis zur Geländeoberkante, überdeckter Teil bis unter das Erdreich
-	var wall_top_open := top_y + (0.45 if not e.inside else -0.005)
+	var wall_top_open := top_y + (float(e.get("rim", 0.45)) if not e.inside else -0.005)
 	for side in [-1.0, 1.0]:
 		var t: float = side * (half + PLANK * 0.5)
 		var c0: Vector2 = at.call(dims.open * 0.5 - 0.06, t)
@@ -326,6 +414,10 @@ func _build_stair(m, e: Dictionary, dims: Dictionary, xf: Transform3D, w: float,
 	lb.box(Vector3(drop.x, CEIL_Y - 0.12, drop.y), Vector3(0.10, COVER_Y - CEIL_Y + 0.12, float(e.width) + 2 * PLANK), "darkwood", yaw, true, holder)
 	if e.inside:
 		_house_opening(m, e, dims, house, w, d, holder, at, yaw)
+	elif String(e.get("kind", "")) == "nest":
+		_nest_dressing(m, e, holder, at, yaw)
+	elif String(e.get("kind", "")) == "hatch":
+		_hatch_dressing(m, e, dims, holder, at, yaw, wood)
 	else:
 		_pit_dressing(m, e, dims, holder, at, yaw, wood)
 	# Lampe am Treppenfuß
@@ -350,6 +442,265 @@ func _pit_dressing(m, e: Dictionary, dims: Dictionary, holder: Node3D, at: Calla
 	# Sandsäcke an der Stirnseite (Graben-/Stollenanmutung), Einstieg bleibt frei
 	var bag: Vector2 = at.call(dims.open + 0.45, 0.0)
 	lb.box(Vector3(bag.x, 0.0, bag.y), Vector3(0.55, 0.42, float(e.width) + 2 * PLANK + 0.4), "sandbag", yaw, true, holder)
+
+# --- Ausbau 2: MG-Nest, Einsturz, Luke ------------------------------------------------------------------------------
+
+## Zusatzzugänge bauen und mit einem geraden Stichgang an den nächsten Gang in Laufrichtung anschließen
+func _build_extras(m, polys: Array, mouths: Array, wood: String, mud: String) -> void:
+	var base_chains := chains.size()
+	for e0 in EXTRA_SITES:
+		var e := extra_site(e0)
+		var id := String(e.id)
+		var kind := String(e.kind)
+		var u: Vector2 = e.dir
+		var v := Vector2(-u.y, u.x)
+		var top: Vector2 = e.top
+		var dims := {}
+		var ext := float(e.get("length", 0.0))
+		if kind != "rubble":
+			dims = stair_dims(e)
+			ext = float(dims.length) + LANDING
+		var b := top + u * ext
+		var hit := _join_point(b, u, base_chains)
+		if hit.is_empty():
+			push_error("Stollen: Zusatzzugang %s findet keinen Gang" % id)
+			continue
+		var c: Vector2 = hit[0]
+		if kind == "rubble":
+			_build_rubble(m, e, ext, wood, mud)
+		else:
+			_build_stair(m, e, dims, Transform3D.IDENTITY, 0.0, 0.0, null, wood, mud)
+		var hv := v * WIDTH * 0.5
+		var far := c + u * WIDTH * 0.5
+		polys.append(PackedVector2Array([b - hv, far - hv, far + hv, b + hv]))
+		mouths.append({"b": b, "u": u, "half": float(e.width) * 0.5, "top_cover": COVER_Y})
+		chains.append(PackedVector2Array([b, c]))
+		segments.append([b, c])
+		_mouth_pts.append(b)
+		_stair_lines.append([top, b, id])
+		nodes["zugang_" + id] = c
+		# Weg ins Freie: bei Luke/Einsturz gerade hinaus, beim Nest seitlich durch die Lücke der Brustwehr
+		var out: Array = [Vector3(top.x - u.x * 1.0, 0.0, top.y - u.y * 1.0)]
+		if kind == "nest":
+			var p1 := top - u * 0.45 + v * 0.95
+			var p2 := top + u * (NEST_GUN_S + 1.15) + v * 1.1
+			var p3 := top + u * (NEST_GUN_S + 1.15) + v * 3.4
+			out = [Vector3(p1.x, 0.0, p1.y), Vector3(p2.x, 0.0, p2.y), Vector3(p3.x, 0.0, p3.y)]
+		extra[id] = {"kind": kind, "top": Vector3(top.x + u.x * 0.15, 0.0, top.y + u.y * 0.15), "head": Vector3(top.x, 0.0, top.y),
+			"bottom": Vector3(b.x, FLOOR_Y, b.y), "join": c, "ci": int(hit[1]), "s": float(hit[2]), "out": out,
+			"u3": Vector3(u.x, 0, u.y), "open_length": extra_open(e), "length": ext, "width": float(e.width),
+			"hole": _local_rect(e, 0.0, extra_open(e), float(e.width) * 0.5), "surface": extra_surface(e)}
+
+## Erster Punkt auf einer der ersten n Gangachsen entlang b + u·t: [Punkt, Gang, Bogenlänge] oder []
+func _join_point(b: Vector2, u: Vector2, n: int) -> Array:
+	var t := 0.3
+	while t < 30.0:
+		var p := b + u * t
+		for ci in n:
+			var pts: PackedVector2Array = chains[ci]
+			if _dist_polyline(p, pts) < 0.12:
+				var acc := 0.0
+				var best := INF
+				var s := 0.0
+				for i in pts.size() - 1:
+					var q := Geometry2D.get_closest_point_to_segment(p, pts[i], pts[i + 1])
+					if q.distance_to(p) < best:
+						best = q.distance_to(p)
+						s = acc + q.distance_to(pts[i])
+					acc += pts[i].distance_to(pts[i + 1])
+				return [p, ci, s]
+		t += 0.04
+	return []
+
+## MG-Nest am Treppenkopf: bedienbares MG42 (Original-Stellungsmodell aus dem lokalen Cache, gleiche Bedienung und
+## Netzabgleich wie das MG im Holzhaus) hinter einer U-förmigen Sandsack-Brustwehr; rechts hinten offen (Durchgang).
+func _nest_dressing(m, e: Dictionary, holder: Node3D, at: Callable, yaw: float) -> void:
+	var lb: LevelBuilder = m.lb
+	var u: Vector2 = e.dir
+	var g: Vector2 = at.call(NEST_GUN_S, 0.0)
+	var pivot_h := _nest_gun(m, holder, Vector3(g.x, 0.0, g.y), u)
+	var h := clampf(pivot_h - 0.35, 0.6, 0.95)          # Brustwehr knapp unter der Waffenachse (Schussfeld frei)
+	var f := NEST_GUN_S - 1.05
+	for sg in [[f, -1.6, f, 1.6], [f, -1.6, -0.3, -1.6], [f, 1.6, NEST_GUN_S - 0.3, 1.6]]:
+		var a: Vector2 = at.call(sg[0], sg[1])
+		var bb: Vector2 = at.call(sg[2], sg[3])
+		var d := bb - a
+		var mid := (a + bb) * 0.5
+		var sy := atan2(-d.y, d.x)
+		lb.box(Vector3(mid.x, 0.0, mid.y), Vector3(d.length() + 0.5, h * 0.55, 0.55), "sandbag", sy, true, holder)
+		lb.box(Vector3(mid.x, h * 0.55, mid.y), Vector3(d.length() + 0.38, h * 0.45, 0.44), "sandbag", sy + 0.012, true, holder)
+	# Munitionskästen und Ersatzlaufbehälter an der linken Wand (nur Optik, Weg bleibt frei)
+	var olive := _mat("olive", Color(0.28, 0.30, 0.20), 0.7, 0.3)
+	for k in 3:
+		var p: Vector2 = at.call(-0.9 - k * 0.42, -1.12)
+		var n: Node3D = lb.box(Vector3(p.x, 0.0, p.y), Vector3(0.3, 0.19 if k < 2 else 0.12, 0.16 if k < 2 else 0.5), "darkwood", yaw + 0.06 * k, false, holder)
+		for c in n.get_children():
+			if c is MeshInstance3D:
+				(c as MeshInstance3D).material_override = olive
+	holder.set_meta("parapet_height", h)
+	decor_count += 3
+
+func _nest_gun(m, holder: Node3D, pos: Vector3, u: Vector2) -> float:
+	var frame := Node3D.new()
+	frame.name = "NestMG42"
+	holder.add_child(frame)
+	frame.global_position = pos + Vector3.UP * 0.02
+	frame.rotation.y = atan2(u.x, u.y)               # −Z zeigt gegen die Abstiegsrichtung (ins Gelände)
+	var lb: LevelBuilder = m.lb
+	lb.box(Vector3.ZERO, Vector3(0.18, 1.22, 0.18), "darkwood", 0.0, true, frame)   # Waffenbock wie im Holzhaus
+	lb.box(Vector3(0, 1.17, 0), Vector3(0.65, 0.06, 0.32), "darkwood", 0.0, true, frame)
+	var path := OrigLevel.cache_root() + "/africa1/models/w_mg42stand.glb"
+	var model := OrigLevel.parse_glb(path) if FileAccess.file_exists(path) or ResourceLoader.exists(path) else null
+	if model == null:
+		push_warning("Stollen: MG42-Modell fehlt (lokaler Cache) – MG-Nest nur als Deckung")
+		return 1.25
+	frame.add_child(model)
+	var pivot := model.find_child("HORT00", true, false) as Node3D
+	var pl := frame.to_local(pivot.global_position) if pivot else Vector3(0, 1.25, 0)
+	model.position = Vector3(-pl.x, 0, -pl.z)
+	var stand := model.find_child("Stojan", true, false)
+	if stand and "_templates" in m and m._templates:
+		m._templates._mesh_colliders(stand)
+	var gun = Placement.FieldFlak.new()
+	gun.name = "StollenMG42_Bedienung"
+	m.dynamic_root.add_child(gun)
+	gun.init(null, frame, {"name": "bavaria_tunnel_mg42", "inventory": [33, 33, 33, 33, 33, 33]}, WeaponDB.from_orig(33, true), 0)
+	gun.operator_offset = Vector3(0, 0.1, 1.70)
+	gun.setup_rig({"left": 40.0, "right": 40.0, "up": 15.0, "down": 8.0})
+	gun.seat = null
+	gun.global_position = gun.gunner_spot() + Vector3.UP * 0.5
+	gun.base_yaw = frame.rotation.y
+	gun.add_to_group("bavaria_tunnel_mg42")
+	nest_gun = gun
+	frame.set_meta("source", "africa1/models/w_mg42stand")
+	m._templates.reused_models += 1
+	return frame.to_local(pivot.global_position).y if pivot else 1.25
+
+## Bodenluke: flacher Rahmen, zwei offene Flügel (stehen seitlich, beschlagen), Treppe wie die Haustreppen
+func _hatch_dressing(m, e: Dictionary, dims: Dictionary, holder: Node3D, at: Callable, yaw: float, wood: String) -> void:
+	var lb: LevelBuilder = m.lb
+	var u: Vector2 = e.dir
+	var v := Vector2(-u.y, u.x)
+	var half := float(e.width) * 0.5
+	var rim := float(e.get("rim", 0.06))
+	var open: float = dims.open
+	var span := float(e.width) + 2 * PLANK + 0.16
+	for s in [-0.08, open + 0.08]:
+		var p: Vector2 = at.call(s, 0.0)
+		lb.box(Vector3(p.x, -0.06, p.y), Vector3(0.16, rim + 0.08, span), "darkwood", yaw, true, holder)
+	var black := _mat("black", Color(0.05, 0.05, 0.05), 0.6)
+	var wl := half + PLANK * 0.5
+	var mid: Vector2 = at.call(open * 0.5, 0.0)
+	for side in [-1.0, 1.0]:
+		var hinge: Vector2 = mid + v * side * (half + PLANK)
+		var pv := Node3D.new()
+		pv.name = "Lukenfluegel_%s" % ("links" if side < 0 else "rechts")
+		holder.add_child(pv)
+		pv.transform = Transform3D(Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, deg_to_rad(105.0) * side), Vector3(hinge.x, rim, hinge.y))
+		lb.box(Vector3(0, 0, -side * wl * 0.5), Vector3(open + 0.1, 0.05, wl), wood, 0.0, true, pv)
+		for k in [-0.38, 0.0, 0.38]:
+			var band: Node3D = lb.box(Vector3(open * k, 0.05, -side * wl * 0.5), Vector3(0.06, 0.012, wl * 0.92), "darkwood", 0.0, false, pv)
+			for c in band.get_children():
+				if c is MeshInstance3D:
+					(c as MeshInstance3D).material_override = black
+		var ring: Node3D = lb.box(Vector3(0, 0.05, -side * wl * 0.8), Vector3(0.12, 0.025, 0.05), "darkwood", 0.0, false, pv)
+		for c in ring.get_children():
+			if c is MeshInstance3D:
+				(c as MeshInstance3D).material_override = black
+	decor_count += 2
+
+## Eingestürzter Gangteil: offener Trichter über der Schuttrampe (unsichtbare Kollision + sichtbare Schüttung in gleicher
+## Lage), Erdwände, Kraterrand aus Erde, Schutt, Balken und Bretter; Lampe erst hinter der Bruchkante im Gang.
+func _build_rubble(m, e: Dictionary, ext: float, wood: String, mud: String) -> void:
+	var lb: LevelBuilder = m.lb
+	var holder := Node3D.new()
+	holder.name = "Einsturz_" + String(e.id)
+	root.add_child(holder)
+	var top: Vector2 = e.top
+	var u: Vector2 = e.dir
+	var v := Vector2(-u.y, u.x)
+	var half := float(e.width) * 0.5
+	var yaw := atan2(-u.y, u.x)
+	var at := func(s: float, t: float) -> Vector2: return top + u * s + v * t
+	var a3 := Vector3(top.x, 0.0, top.y)
+	var b3 := Vector3(top.x + u.x * ext, FLOOR_Y, top.y + u.y * ext)
+	var xa := (b3 - a3).normalized()
+	var za := Vector3(v.x, 0, v.y)
+	var ya := za.cross(xa).normalized()
+	if ya.y < 0:
+		ya = -ya
+		za = -za
+	var basis := Basis(xa, ya, za)
+	var len := a3.distance_to(b3)
+	var ramp := StaticBody3D.new()
+	ramp.name = "Schuttrampe"
+	var rcs := CollisionShape3D.new()
+	var rbox := BoxShape3D.new()
+	rbox.size = Vector3(len + 0.1, 0.2, float(e.width))
+	rcs.shape = rbox
+	ramp.add_child(rcs)
+	holder.add_child(ramp)
+	ramp.transform = Transform3D(basis, (a3 + b3) * 0.5 - ya * 0.1)
+	ramp.set_meta("slope_deg", rad_to_deg(atan2(-FLOOR_Y, ext)))
+	var slab := MeshInstance3D.new()
+	slab.name = "Schuettung"
+	var sm := BoxMesh.new()
+	sm.size = Vector3(len, 0.5, float(e.width) + 0.02)
+	slab.mesh = sm
+	slab.material_override = lb.mat(mud)
+	holder.add_child(slab)
+	slab.transform = Transform3D(basis, (a3 + b3) * 0.5 - ya * 0.255)
+	# Erdwände (Kollision), Kopfwand, Bruchkante über dem Gangmund (bis knapp unter Gelände: kein Z-Fighting)
+	for side in [-1.0, 1.0]:
+		var c0: Vector2 = at.call(ext * 0.5, side * (half + PLANK * 0.5))
+		lb.box(Vector3(c0.x, FLOOR_Y - 0.05, c0.y), Vector3(ext + 0.12 + PLANK, -0.012 - FLOOR_Y + 0.05, PLANK), mud, yaw, true, holder)
+	var hc: Vector2 = at.call(-PLANK * 0.5, 0.0)
+	lb.box(Vector3(hc.x, FLOOR_Y, hc.y), Vector3(PLANK, -0.012 - FLOOR_Y, float(e.width) + 2 * PLANK), mud, yaw, true, holder)
+	var mc: Vector2 = at.call(ext + 0.05, 0.0)
+	lb.box(Vector3(mc.x, CEIL_Y - 0.12, mc.y), Vector3(0.10, -0.012 - CEIL_Y + 0.12, float(e.width) + 2 * PLANK), mud, yaw, true, holder)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 1945
+	# Kraterrand: flache Erdhaufen seitlich und am Ende (Kollision niedrig, Unterkante unter Gelände)
+	for side in [-1.0, 1.0]:
+		for i in 4:
+			var p: Vector2 = at.call(0.2 + i * (ext - 0.4) / 3.0, side * (half + 0.5 + rng.randf_range(-0.08, 0.08)))
+			lb.box(Vector3(p.x, -0.06, p.y), Vector3(rng.randf_range(1.5, 2.1), rng.randf_range(0.26, 0.34), rng.randf_range(0.7, 0.85)), mud, yaw + rng.randf_range(-0.25, 0.25), true, holder)
+	var endp: Vector2 = at.call(ext + 0.9, 0.0)
+	lb.box(Vector3(endp.x, -0.06, endp.y), Vector3(1.2, 0.32, float(e.width) + 1.6), mud, yaw + 0.08, true, holder)
+	# Schutt auf der Rampe (nur Optik, Mitte bleibt frei), abgerutschte Balken und Bretter
+	var mats := ["stone", "stone", mud, "darkwood"]
+	for k in 16:
+		var s := rng.randf_range(0.5, ext - 0.4)
+		var side := -1.0 if k % 2 == 0 else 1.0
+		var p: Vector2 = at.call(s, side * rng.randf_range(0.42, half - 0.05))
+		var y := FLOOR_Y * s / ext
+		lb.box(Vector3(p.x, y - 0.08, p.y), Vector3(rng.randf_range(0.18, 0.5), rng.randf_range(0.12, 0.3), rng.randf_range(0.16, 0.42)),
+			mats[k % mats.size()], rng.randf() * TAU, false, holder)
+		decor_count += 1
+	for side in [-1.0, 1.0]:
+		var bc: Vector2 = at.call(ext * (0.42 if side < 0 else 0.62), side * (half - 0.16))
+		var by := FLOOR_Y * (ext * (0.42 if side < 0 else 0.62)) / ext
+		var beam: Node3D = lb.box(Vector3.ZERO, Vector3(2.9, 0.15, 0.15), frame_mat, 0.0, false, holder)
+		beam.transform = Transform3D(basis.rotated(ya, side * 0.12), Vector3(bc.x, by + 0.02, bc.y))
+		decor_count += 1
+	# Gebrochener Rahmen an der Bruchkante: ein Stiel steht, einer hängt schief; gesplitterte Kappe oben quer
+	var post_a: Vector2 = at.call(ext - 0.12, -(half - 0.09))
+	lb.box(Vector3(post_a.x, FLOOR_Y - 0.04, post_a.y), Vector3(0.15, CEIL_Y - FLOOR_Y + 0.04, 0.15), frame_mat, yaw, true, holder)
+	var post_b: Vector2 = at.call(ext - 0.35, half - 0.12)
+	var pb: Node3D = lb.box(Vector3(post_b.x, FLOOR_Y + 0.1, post_b.y), Vector3(0.15, 1.9, 0.15), frame_mat, yaw, false, holder)
+	pb.rotate_object_local(Vector3.RIGHT, 0.22)
+	var cap: Vector2 = at.call(ext - 0.12, 0.0)
+	var cp: Node3D = lb.box(Vector3(cap.x, CEIL_Y - 0.16, cap.y), Vector3(0.16, 0.16, float(e.width) * 0.75), frame_mat, yaw, false, holder)
+	cp.rotate_object_local(Vector3.RIGHT, -0.18)
+	for k in 5:
+		var side := -1.0 if k % 2 == 0 else 1.0
+		var p: Vector2 = at.call(rng.randf_range(0.6, ext - 0.8), side * (half - 0.02))
+		var pl: Node3D = lb.box(Vector3(p.x, rng.randf_range(-2.8, -0.9), p.y), Vector3(rng.randf_range(0.7, 1.4), 0.16, 0.03), wood, yaw, false, holder)
+		pl.rotate_object_local(Vector3.FORWARD, rng.randf_range(-0.5, 0.5))
+		decor_count += 1
+	# Lampe erst hinter der Bruchkante im Gang (Spot nach unten, nichts leuchtet nach oben ins Freie)
+	var lp: Vector2 = at.call(ext + 1.3, 0.0)
+	_lamp(m, holder, Vector3(lp.x, CEIL_Y - 0.05, lp.y), holder)
 
 ## Treppenloch im Hausboden: alten Boden (Kollision + Darstellung) ersetzen, Geländer, Möbel im Treppenbereich verlegen.
 func _house_opening(m, e: Dictionary, dims: Dictionary, house: Node3D, w: float, d: float, holder: Node3D, at: Callable, yaw: float) -> void:
@@ -760,6 +1111,8 @@ func _floor_ceiling(m, outline: Array, mud: String, wood: String) -> void:
 			mi.name = level[3]
 			mi.mesh = st.commit()
 			mi.material_override = lb.mat(level[1])
+			if not up:
+				mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_DOUBLE_SIDED   # sperrt Lampenlicht nach oben
 			root.add_child(mi)
 			mi.create_trimesh_collision()
 
@@ -849,8 +1202,8 @@ func _frames_and_lamps(m) -> void:
 				for side in [-1.0, 1.0]:
 					var pp: Vector2 = p + v * side * (WIDTH * 0.5 - 0.08)
 					var fy := floor_at(pp) - 0.04
-					lb.box(Vector3(pp.x, fy, pp.y), Vector3(0.15, cy - fy, 0.15), "darkwood", yaw, true, root)
-				lb.box(Vector3(p.x, cy - 0.16, p.y), Vector3(0.16, 0.16, WIDTH), "darkwood", yaw, false, root)
+					lb.box(Vector3(pp.x, fy, pp.y), Vector3(0.15, cy - fy, 0.15), frame_mat, yaw, true, root)
+				lb.box(Vector3(p.x, cy - 0.16, p.y), Vector3(0.16, 0.16, WIDTH), frame_mat, yaw, false, root)
 				if s >= next_lamp:
 					next_lamp = s + LAMP_STEP
 					_lamp(m, root, Vector3(p.x, cy - 0.16, p.y), root)
@@ -884,11 +1237,36 @@ func _lamp(m, parent: Node3D, pos: Vector3, _owner: Node3D) -> void:
 	bm.emission_energy_multiplier = 2.2
 	bulb.material_override = bm
 	lamp.add_child(bulb)
-	var light := OmniLight3D.new()
+	# Pack 09: Deckenleuchte 1940 (Schirm) um die Birne; Licht und Flackern unverändert
+	var shade := LibraryModels.load_model("deckenlampe_1940") if LibraryModels.enabled() else null
+	if shade:
+		var sb: AABB = m._templates.mesh_bounds(shade, Transform3D.IDENTITY)
+		var k := clampf(0.34 / maxf(sb.size.y, 0.01), 0.2, 1.5)    # Höhe auf 0,34 m unter dem Kappbalken
+		shade.scale = Vector3.ONE * k
+		shade.position = Vector3(-sb.get_center().x * k, -sb.end.y * k, -sb.get_center().z * k)
+		for mi in shade.find_children("*", "MeshInstance3D", true, false):
+			(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		lamp.add_child(shade)
+		wire.visible = false
+	# Die Decke liegt nur ≈ 0,4 m unter der Grabensohle: ein Rundumlicht ohne Schatten leuchtete (und flackerte) oben in
+	# den Gräben. Daher Spot nach unten (Schirmleuchte, 160° Öffnung): Sohle/Wände hell, nichts oberhalb der Lampe.
+	# Ohne Schatten (Lichtbudget). --tunnel_schatten=0 = altes Rundumlicht (nur Vergleichsbilder).
+	var light: Light3D
+	if String(Game.cli.get("tunnel_schatten", "1")) == "0":
+		var omni := OmniLight3D.new()
+		omni.omni_range = 5.5
+		omni.omni_attenuation = 1.4
+		light = omni
+	else:
+		var spot := SpotLight3D.new()
+		spot.spot_range = 6.0
+		spot.spot_angle = 80.0
+		spot.spot_angle_attenuation = 0.8
+		spot.spot_attenuation = 1.3
+		spot.rotation.x = -PI * 0.5          # −Z (Spotrichtung) nach unten
+		light = spot
 	light.light_color = Color(1.0, 0.72, 0.42)
 	light.light_energy = 0.75
-	light.omni_range = 5.5
-	light.omni_attenuation = 1.4
 	light.shadow_enabled = false
 	light.distance_fade_enabled = true
 	light.distance_fade_begin = 30.0
@@ -917,6 +1295,21 @@ func walk_route(target: String) -> Array:
 	var l0 := chain_length(chains[0])
 	var path2: Array = []
 	var tail: Array = []
+	if extra.has(target):
+		# Zusatzzugang: bis zum Anschluss am Gang, Stichgang, hinauf und ins Freie
+		var x: Dictionary = extra[target]
+		var xc: int = x.ci
+		if xc == 0:
+			path2 = chain_between(chains[0], 0.0, x.s)
+		else:
+			path2 = chain_between(chains[0], 0.0, l0) + chain_between(chains[xc], 0.0, x.s)
+		path2.append(x.join)
+		for q in path2:
+			pts.append(Vector3(q.x, floor_at(q), q.y))
+		pts.append(x.bottom)
+		pts.append(x.top)
+		pts.append_array(x.out)
+		return pts
 	if target in ["antennenhaus", "reihenhaus"]:
 		var ci := 1 if target == "antennenhaus" else 2
 		path2 = chain_between(chains[0], 0.0, l0) + chain_between(chains[ci], 0.0, chain_length(chains[ci]))
@@ -1141,6 +1534,10 @@ func _decorate(m, wood: String, _mud: String) -> void:
 				_dcyl(_rp(rm, w * 0.5 - 0.4, -0.25), 0.0, 0.29, 0.88, olive, true)
 				_dbox(m, _rp(rm, -1.1, -d * 0.5 + 0.3), 0.0, Vector3(0.85, 0.45, 0.42), "sandbag", yt, true)
 				_dbox(m, _rp(rm, -1.1, -d * 0.5 + 0.3), 0.45, Vector3(0.6, 0.25, 0.38), "sandbag", yt - 0.06, false)
+				if LibraryModels.enabled():
+					# Pack 09: Werkzeug an der Seitenwand (liegend, ohne Kollision)
+					_dprop(m, "lib:schaufel", _rp(rm, -w * 0.5 + 0.18, 0.45), 0.0, yt + PI * 0.5)
+					_dprop(m, "lib:spitzhacke", _rp(rm, -w * 0.5 + 0.2, 0.0), 0.0, yt + PI * 0.5)
 			"schlafnische":
 				var b1 := _rp(rm, -0.3, d * 0.5 - 0.42)
 				_dbox(m, b1, 0.0, Vector3(1.9, 0.36, 0.72), "darkwood", yt, true)

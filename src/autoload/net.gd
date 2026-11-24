@@ -848,6 +848,7 @@ func public_settings() -> Dictionary:
 	s["has_password"] = String(s.get("password", "")) != ""
 	for k in ["password", "admin_login", "admin_pass"]:
 		s.erase(k)
+	Game.CUSTOM_MAPS.annotate_settings(s)   # eigene Karte: id/sha256/version (Zusatzschlüssel, Protokoll unverändert)
 	return s
 
 
@@ -861,6 +862,15 @@ func _rejected(reason: String) -> void:
 @rpc("authority", "call_remote", "reliable")
 func _enter_match(cfg: Dictionary, scores: Array) -> void:
 	print("NET: betrete Runde, Karte ", cfg.get("map"))
+	# Eigene Karte: gleiche .pck (SHA-256) wie der Server? Sonst Meldung DE/EN und zurück ins Menü.
+	var cm_err: String = Game.CUSTOM_MAPS.check_remote(cfg)
+	if cm_err != "":
+		print("NET: eigene Karte abgelehnt / custom map rejected: ", cm_err.replace("\n", " | "))
+		leave(true)
+		last_error = cm_err
+		status_changed.emit(cm_err)
+		Events.say(cm_err, 10.0)
+		return
 	settings = cfg
 	team_score = scores
 	match_over = false
@@ -1598,7 +1608,7 @@ func _rank_msg(id: int, rank: int, up: bool) -> void:
 	else:
 		_chat("Server", "%s %s %s" % [String(players.get(id, {}).get("name", "?")), tx(8903 if up else 8902,
 			"wurde befördert zu" if up else "wurde degradiert zu"), rn], false)
-	rank_log.append([id, rank, up])
+	_capped(rank_log, [id, rank, up])
 
 
 var rank_log: Array = []      ## Tests/Anzeige: [Peer-ID, Rang, befördert]
@@ -1611,7 +1621,7 @@ var rank_log: Array = []      ## Tests/Anzeige: [Peer-ID, Rang, befördert]
 func announce_promotion(id: int, rank_label: String) -> void:
 	if is_online and not multiplayer.is_server():
 		return
-	rank_log.append([id, -1, true, rank_label])
+	_capped(rank_log, [id, -1, true, rank_label])
 	var line := "%s %s %s" % [String(players.get(id, {}).get("name", "?")), tx(8903, "wurde befördert zu"), rank_label]
 	if not dedicated and id != my_id():
 		_chat("Server", line, false)
@@ -1758,6 +1768,8 @@ func _team_humans(t: int) -> int:
 	return n
 
 
+var _team_fixed := false
+
 func _begin_match() -> void:
 	match_over = false
 	_match_t = 0.0
@@ -1783,6 +1795,29 @@ func _begin_match() -> void:
 		p["rank"] = 0
 		p["lives_used"] = 0
 		_reset_report_stats(p)
+	# Kartenrotation mit wechselndem Stil (z. B. Deathmatch → Besetzung): Seite passend zum neuen Stil neu wählen.
+	# Vorher behielt ein Spieler nach einer Deathmatch-Runde seine Einzelseite (≥ 10) → in Team-Stilen Feind BEIDER
+	# Teams (Bots kämpften gegen ihn statt Zonen anzugreifen), keine eigene Zone/kein Zonen-Spawn; umgekehrt teilten sich
+	# Spieler im Deathmatch eine Seite 0/1.
+	var dm := mode() == Mode.DEATHMATCH
+	var dm_next := 10 + players.size()
+	for p in players.values():
+		dm_next = maxi(dm_next, int(p.get("team", -1)) + 1)
+	for k in players.keys():
+		var p: Dictionary = players[k]
+		var t := int(p.get("team", -1))
+		if (dm and t in [Soldier.TEAM_ALLIED, Soldier.TEAM_AXIS]) or (not dm and t >= 10):
+			p["team"] = -1
+			p.erase("next_team")
+			if dm:
+				p["team"] = dm_next      # eindeutige Einzelseite
+				dm_next += 1
+			else:
+				p["team"] = _pick_team()
+			_team_fixed = true
+	if _team_fixed and is_online and multiplayer.is_server():
+		_team_fixed = false
+		_players.rpc(players)
 	_round_started_unix = int(Time.get_unix_time_from_system())
 	_round_started_ms = Time.get_ticks_msec()
 	_soldiers.clear()
@@ -1888,7 +1923,7 @@ func _auto_balance(id: int) -> void:
 		return
 	players[id]["team"] = o
 	players[id].erase("zone")
-	balance_log.append([id, t, o])
+	_capped(balance_log, [id, t, o])
 	_players.rpc(players)
 	_announce("%s: %s → %s" % [tx(2372, "AUTO. TEAMAUSGLEICH"), String(players[id]["name"]), team_name(o)])
 
@@ -2412,6 +2447,10 @@ func _use(pid: String) -> void:
 			(n as Node3D).global_position.distance_to(s.net_target))
 		if d > USE_RANGE:
 			_reject_log(sid, "use", "%s außer Reichweite (%.1f m)" % [pid, d])
+			return
+		# Sichtlinie: nicht durch Decken/Wände benutzen (z. B. Stellung aus dem Stollen darunter)
+		if n is Interactable and not Interactable.sight_clear(s, n as Node3D):
+			_reject_log(sid, "use", "%s ohne Sichtlinie" % pid)
 			return
 	_use_apply(s, n)
 	_relay_except(sid, func(p: int): _buse.rpc_id(p, sid, pid))
@@ -3408,7 +3447,7 @@ func _corpse_pose(pid: int, gen: int, pose: PackedFloat32Array, origin := Vector
 		s.set_meta("gore_mask", Gore.sanitize_mask(gore))
 		Gore.apply(s, Gore.sanitize_mask(gore), Vector3.ZERO, false)
 	if not pose.is_empty() and s.model and s.model.apply_corpse_pose(pose):
-		corpse_pose_log.append(pid)
+		_capped(corpse_pose_log, pid)
 		_trim_log(corpse_pose_log)
 	elif origin.is_finite():
 		s.pin_corpse(origin)           # ohne passendes Skelett/Ragdoll: wenigstens der Leichenort des Servers
@@ -3623,13 +3662,26 @@ func mem_stat() -> Dictionary:
 		"rejects": rejects.size(), "map": String(settings.get("map", "")), "round": round_no}
 
 
+## 0.12.2: Diagnose-/Testlisten im Langlauf begrenzen (vorher unbegrenzt: rank_log, balance_log, zone_events,
+## corpse_pose_log) / cap diagnostic lists on long-running servers
+const LOG_CAP := 200
+
+
+static func _capped(a: Array, v, cap := LOG_CAP) -> void:
+	a.append(v)
+	while a.size() > cap:
+		a.pop_front()
+
+
 func mem_stat_line() -> String:
 	var d := mem_stat()
 	var a: Dictionary = d["auth"]
-	return "MEMSTAT t=%d static_mb=%.1f objects=%d nodes=%d orphans=%d resources=%d peers=%d players=%d soldiers=%d gen=%d corpses=%d decals=%d auth_live=%d auth_pending=%d auth_drop=%d chat=%d feed=%d rejects=%d map=%s round=%d" % [
+	var piles := get_tree().get_nodes_in_group("field_piles").size()
+	var logs := rank_log.size() + balance_log.size() + zone_events.size() + corpse_pose_log.size() + hit_log.size() + hurt_log.size()
+	return "MEMSTAT t=%d static_mb=%.1f objects=%d nodes=%d orphans=%d resources=%d peers=%d players=%d soldiers=%d gen=%d corpses=%d decals=%d auth_live=%d auth_pending=%d auth_drop=%d chat=%d feed=%d rejects=%d map=%s round=%d piles=%d logs=%d" % [
 		d["t"], d["static_mb"], d["objects"], d["nodes"], d["orphans"], d["resources"], d["peers"], d["players"],
 		d["soldiers"], d["gen"], d["corpses"], d["decals"], int(a.get("live", 0)), int(a.get("pending", 0)),
-		int(a.get("dropping", 0)), d["chat"], d["feed"], d["rejects"], d["map"], d["round"]]
+		int(a.get("dropping", 0)), d["chat"], d["feed"], d["rejects"], d["map"], d["round"], piles, logs]
 
 
 func board_text() -> String:
@@ -4663,7 +4715,7 @@ func _zone_event(zi: int, owner: int, by: int) -> void:
 		if zi < zone_progress.size():
 			zone_progress[zi] = 0.0
 		_zones(zone_owner, zone_progress)
-	zone_events.append([zi, owner, by])
+	_capped(zone_events, [zi, owner, by])
 	var m = Game.current_mission()
 	var nm := "Zone %d" % (zi + 1)
 	if m and m.has_method("mp_zones") and zi < (m.mp_zones() as Array).size():

@@ -16,13 +16,21 @@ static func enabled() -> bool:
 	return str(Game.cli.get("nav_cache", "1")) != "0"
 
 
-## Kartenname für den Dateinamen (Originalordner bzw. Missionsskript)
+## Kartenname für den Dateinamen (Originalordner bzw. Missionsskript). Missionen mit mehreren Aufbauten aus einem
+## Skript (z. B. Platzhalter/echte Daten, Spielfläche je Spielart) liefern optional `nav_cache_variant()` → eigener
+## Speicherplatz je Aufbau („<skript>-<variante>“), sonst verdrängen sich die Stände gegenseitig (write löscht
+## ältere Stände derselben Karte).
 static func map_id(m: Node) -> String:
 	var o = m.get("orig")
 	if o != null and "mission_dir" in o and str(o.mission_dir) != "":
 		return str(o.mission_dir).trim_suffix("/").get_file().validate_filename()
 	var sp: String = m.get_script().resource_path if m.get_script() else "mission"
-	return sp.get_file().get_basename().validate_filename()
+	var id := sp.get_file().get_basename()
+	if m.has_method("nav_cache_variant"):
+		var v := String(m.call("nav_cache_variant")).replace("_", "-")
+		if v != "":
+			id += "-" + v
+	return id.validate_filename()
 
 
 static func _file_stamp(path: String) -> String:
@@ -76,7 +84,7 @@ static func make_key(m: Node, nm: NavigationMesh, src: NavigationMeshSourceGeome
 	# Optionen
 	parts.append("detail:%s|%s" % [nm.detail_sample_distance, nm.detail_sample_max_error])
 	parts.append("part:%d" % nm.sample_partition_type)    # 0.12.1: Layer-Partition für Wendeltreppen-Karten
-	for opt in ["no_nav_bridges", "nav_slope", "nav_tiles", "nav_auto_stairs_off", "nav_foot_snap"]:
+	for opt in ["no_nav_bridges", "nav_slope", "nav_tiles", "nav_auto_stairs_off", "nav_foot_snap", "nav_bridge_strict"]:
 		parts.append("%s=%s" % [opt, str(Game.cli.get(opt, "<none>"))])
 	parts.append("plan:" + plan)
 	hc.update("\n".join(parts).to_utf8_buffer())

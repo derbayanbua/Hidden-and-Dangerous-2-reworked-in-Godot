@@ -231,10 +231,10 @@ func _restore_local_poses(saved: Array) -> void:
 ## Position immer = Ruhe-Abstand zum Elternknochen; Zwischenknochen in Ruhedrehung (genau die Annahme der Gelenke),
 ## Endknochen (Hände, Füße, Finger) mit ihrer Clip-Drehung. Knochenabstände sind damit konstruktiv konstant, der Körper
 ## darf trotzdem frei fliegen (Becken folgt der Physik). Gleiche Rechnung beim Einfrieren (Endpose).
-const LIMIT_SLACK := 12.0               ## Grad über der größten Gelenkgrenze, ab der die Darstellung begrenzt [E]
+const LIMIT_SLACK := 8.0                ## Grad über der Gelenkgrenze je Achse, ab der die Darstellung begrenzt [E]
 var _fk: FkPose
 var _fk_mid := {}                       ## Knochenindex → true: Zwischenknochen mit simuliertem Nachfahren
-var _fk_lim := {}                       ## Knochenindex → größter Gelenkwinkel [rad]
+var _fk_lim := {}                       ## Knochenindex → [X, Y, Z] Vector2(min, max) [rad] inkl. LIMIT_SLACK
 var fk_clamped := 0                      ## Zahl begrenzter Gelenkwinkel (Test/Statistik)
 
 
@@ -245,10 +245,11 @@ func _prepare_fk() -> void:
 		var bi := sk.find_bone(bn)
 		var lim: Array = BONES[bn].get("lim", [])
 		if not lim.is_empty():
-			var mx := 0.0
+			# B-061: Grenzen je Achse (vorher ein Kegel mit der größten Grenze → Rumpf c durfte 62° nach hinten statt 15°)
+			var lr := []
 			for ax in lim:
-				mx = maxf(mx, maxf(absf(float(ax[0])), absf(float(ax[1]))))
-			_fk_lim[bi] = deg_to_rad(mx + LIMIT_SLACK)
+				lr.append(Vector2(deg_to_rad(float(ax[0]) - LIMIT_SLACK), deg_to_rad(float(ax[1]) + LIMIT_SLACK)))
+			_fk_lim[bi] = lr
 		var p := sk.get_bone_parent(bi)
 		while p >= 0 and not bodies.has(sk.get_bone_name(p)):
 			_fk_mid[p] = true
@@ -298,11 +299,12 @@ func _fk_bone(i: int, out: Array, world: Array, inv_sk: Transform3D) -> Transfor
 		var rel := rq.inverse() * q
 		if rel.w < 0.0:
 			rel = -rel
-		var lim := float(_fk_lim.get(i, PI))
-		if rel.get_angle() > lim:
-			rel = Quaternion.IDENTITY.slerp(rel, lim / rel.get_angle())
-			q = rq * rel
-			fk_clamped += 1
+		var lim: Variant = _fk_lim.get(i, null)
+		if lim != null:
+			var cl := _clamp_axes(rel, lim)
+			if not cl.is_equal_approx(rel):
+				q = rq * cl
+				fk_clamped += 1
 	elif _fk_mid.has(i):
 		q = rest.basis.get_rotation_quaternion()
 	else:
@@ -311,6 +313,32 @@ func _fk_bone(i: int, out: Array, world: Array, inv_sk: Transform3D) -> Transfor
 	out[i] = [rest.origin, q]
 	world[i] = t
 	return t
+
+
+## Gelenkdrehung relativ zur Ruhelage je Achse begrenzen (Swing-Twist um die Knochenachse Y wie die Endlagenprüfung):
+## Swing = Rx(Streckung) · Rz(seitlich), Twist um Y; lim = [X, Y, Z] als Vector2(min, max) in rad.
+static func _clamp_axes(rel: Quaternion, lim: Array) -> Quaternion:
+	var tw := Quaternion(0.0, rel.y, 0.0, rel.w)
+	if tw.length() < 1e-6:
+		tw = Quaternion.IDENTITY
+	tw = tw.normalized()
+	var swing := rel * tw.inverse()
+	var tw_ang := wrapf(2.0 * atan2(tw.y, tw.w), -PI, PI)
+	var v := swing * Vector3.UP
+	var ext := atan2(v.z, v.y)
+	var side := asin(clampf(-v.x, -1.0, 1.0))
+	var lx: Vector2 = lim[0]
+	var ly: Vector2 = lim[1]
+	var lz: Vector2 = lim[2]
+	var ext_c := clampf(ext, lx.x, lx.y)
+	var side_c := clampf(side, lz.x, lz.y)
+	var tw_c := clampf(tw_ang, ly.x, ly.y)
+	if is_equal_approx(ext_c, ext) and is_equal_approx(side_c, side) and is_equal_approx(tw_c, tw_ang):
+		return rel
+	var sw := swing
+	if not (is_equal_approx(ext_c, ext) and is_equal_approx(side_c, side)):
+		sw = Quaternion(Vector3.RIGHT, ext_c) * Quaternion(Vector3.BACK, side_c)
+	return (sw * Quaternion(Vector3.UP, tw_c)).normalized()
 
 
 static var _fk_on := -1
@@ -671,6 +699,10 @@ func freeze() -> void:
 	settled_at = soldier.global_position
 	frozen_pose = export_pose()
 	_place_search_points()
+	# B-061: nach dem nächsten Skelett-Update erneut setzen – Pose/Lage stehen erst dann endgültig fest (Durchsuchen-Punkt
+	# lag sonst gelegentlich an der Lage vor dem Einfrieren)
+	if is_inside_tree() and not get_tree().process_frame.is_connected(_place_search_points_late):
+		get_tree().process_frame.connect(_place_search_points_late, CONNECT_ONE_SHOT)
 	_lay_weapon()
 	settled.emit(frozen_pose)
 	if authoritative and Net.is_online:
@@ -714,6 +746,11 @@ func _place_search_points() -> void:
 	for ch in soldier.get_children():
 		if ch is Interactable:
 			(ch as Node3D).global_position = Vector3(c.x, soldier.global_position.y, c.z)
+
+
+func _place_search_points_late() -> void:
+	if state == State.FROZEN and is_instance_valid(sk):
+		_place_search_points()
 
 
 ## Endpose als Zahlenfeld: [Ursprung x, y, z, Knochenzahl, je Knochen Pos(3) + Quaternion(4)] im Skelettraum

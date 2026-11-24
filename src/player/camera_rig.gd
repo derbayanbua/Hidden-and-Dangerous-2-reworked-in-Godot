@@ -261,7 +261,31 @@ func fpv_body_mode() -> int:
 	var z := zoomed()
 	if target.using_binoculars or (z and int(_zoom_info().get("scope", 5)) <= 3) or (z and not OrigWeapons.available()):
 		return SoldierModel.FPV_BODY_SHADOW
+	if _fpv_look_down:
+		return SoldierModel.FPV_BODY_SHADOW
 	return SoldierModel.FPV_BODY_LEGS
+
+
+## 0.12.2 [D-Befund „beim nach unten schauen passen die Füße nicht“]: Die Beinkopie ist an der Hüfte offen
+## (Schnitt bei halber Bindeposenhöhe). Beim steilen Blick nach unten beugt die Zielhaltung den Oberkörper vor, die
+## Kamera (Kopf) steht über der Hüfte und blickt in die offenen Hosenröhren – stehend wie geduckt ragte der Hohlkörper
+## ins Bild. Unterhalb FPV_LEGS_HIDE_PITCH nur Schatten (Hysterese bis FPV_LEGS_SHOW_PITCH).
+const FPV_LEGS_HIDE_PITCH := deg_to_rad(-50.0)
+const FPV_LEGS_SHOW_PITCH := deg_to_rad(-45.0)
+var _fpv_look_down := false
+
+
+func _update_fpv_look_down() -> bool:
+	var p: float = target.look_pitch if is_instance_valid(target) else 0.0
+	var down := _fpv_look_down
+	if p < FPV_LEGS_HIDE_PITCH:
+		down = true
+	elif p > FPV_LEGS_SHOW_PITCH:
+		down = false
+	if down == _fpv_look_down:
+		return false
+	_fpv_look_down = down
+	return true
 
 
 ## Ego-Ansicht gewünscht: 1.-Person-Modus, Fernglas, Zoom – und bei gehaltenem Zielen mit einer Zoomwaffe auch
@@ -865,8 +889,9 @@ func _process(delta: float) -> void:
 		return
 	var z := zoomed()
 	var binoc := target.using_binoculars
+	var look_down_changed := _update_fpv_look_down()
 	if binoc != _binoc_last or target.model != _model_last or z != _zoom_last or fpv_active != (target.alive and _want_fpv(z)) \
-			or Settings.fpv_body != _fpv_body_last:
+			or Settings.fpv_body != _fpv_body_last or look_down_changed:
 		_fpv_body_last = Settings.fpv_body
 		_binoc_last = binoc
 		_model_last = target.model   # Modell kann sich ändern (Uniformwechsel)

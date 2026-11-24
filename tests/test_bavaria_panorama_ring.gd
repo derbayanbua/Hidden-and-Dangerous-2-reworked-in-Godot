@@ -30,7 +30,7 @@ func _run() -> void:
 	var ring = m.get("panorama_ring")
 	var env: Environment = m.get_world_3d().environment if m.get_world_3d() else null
 	var sky := env.sky.sky_material as ShaderMaterial if env and env.sky else null
-	if sky == null or not bool(sky.get_shader_parameter("far_enabled")):
+	if sky == null or sky.get_shader_parameter("far_enabled") != true:   # null ohne lokale Bilder
 		check(ring == null, "ohne Panoramabilder kein Ring")
 		_finish()
 		return

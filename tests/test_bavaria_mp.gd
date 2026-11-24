@@ -64,6 +64,9 @@ func _run() -> void:
 			check(await wait_for(func(): return m.day_night.synced, 20.0),"Client erhält die Tageszeit vom Server (später Beitritt)")
 			check(is_equal_approx(m.day_night.cycle_min,240.0),"Client übernimmt die Zyklusdauer des Servers")
 			check(m.day_night.hour>2.3 and m.day_night.hour<3.8,"Client-Uhrzeit = Serverzeit (Nacht), nicht eigene Startzeit: %.2f"%m.day_night.hour)
+			if m.weather and m.weather.enabled:
+				check(await wait_for(func(): return m.weather.synced, 20.0) and m.weather.current=="gewitter",
+					"Client erhält das Wetter vom Server (später Beitritt): "+String(m.weather.current))
 			check(await wait_for(func(): return m.room_lighting.initialized and m.room_lighting.lights_on()==m.room_lighting.coverage.size(),20.0)
 				and m.street_lamps.lights_on()==m.street_lamps.lights.size(),"Client: nachts alle Raumlichter und Laternen an")
 			var start := me.global_position
@@ -141,6 +144,8 @@ func _run() -> void:
 	check(is_equal_approx(m.day_night.start_hour,22.0) and is_equal_approx(m.day_night.cycle_min,240.0),
 		"Host übernimmt Startzeit/Zyklus aus den Server-Einstellungen")
 	m.day_night.set_hour(2.5)   # vor dem Beitritt verstellt: Client muss diese Zeit bekommen, nicht 22 Uhr
+	if m.weather and m.weather.enabled:
+		m.weather.set_weather("gewitter", true)   # Wetter vom Host: Client muss es beim Beitritt übernehmen
 	# Exportvorlagen verbieten --path; sie laden das eingebettete Projekt selbst.
 	var args := ["--headless", "--log-file",
 		ProjectSettings.globalize_path("res://test_output/bavaria_mp_client.log"), "--", "--autoplay=test_bavaria_mp", "--bavaria_peer=1"]

@@ -99,7 +99,7 @@ func _probe() -> void:
 	var m: Mission = Game.current_mission()
 	await wait_for(func(): return m.nav_ready, 240.0)
 	var sup: SupportStrike = Net.support
-	await wait_for(func(): return sup.map_open, 5.0)
+	await wait_for(func(): return sup.map_open, 5.0 if DisplayServer.get_name() == "headless" else 60.0)   # Fenster/WARP langsamer
 	var pts: Array = m.mp_spawns() if m.has_method("mp_spawns") else []
 	var box := AABB(pts[0]["pos"], Vector3.ZERO) if not pts.is_empty() else AABB()
 	for p in pts:
@@ -130,6 +130,23 @@ func _probe() -> void:
 		await get_tree().create_timer(0.3).timeout
 		lines.append("STELLE %d orig=%s radio=%s" % [i, cands[i], sup.radio_pos])
 		print(lines[-1])
+		if sup.map_spots:
+			# Missions-Hook (z. B. Bavaria: Sandsacknest am Suchturm): Gerät liegt an der festen Stelle
+			check(sup.radio_pos.is_finite() and Vector2(sup.radio_pos.x - cands[i].x, sup.radio_pos.z - cands[i].z).length() < 4.0,
+				"Funkgerät an der Kartenstelle %d" % i, "%s → %s" % [cands[i], sup.radio_pos])
+			if i == 0 and DisplayServer.get_name() != "headless" and Game.cli.has("ss_shot"):
+				var cam := Camera3D.new()
+				m.add_child(cam)
+				cam.current = true
+				cam.global_position = sup.radio_pos + Vector3(2.4, 1.9, 2.4)
+				cam.look_at(sup.radio_pos + Vector3.UP * 0.2)
+				m.hud.visible = false
+				for _f in 8:
+					await get_tree().process_frame
+				await RenderingServer.frame_post_draw
+				get_viewport().get_texture().get_image().save_png("res://test_output/%s.png" % String(Game.cli["ss_shot"]))
+				cam.queue_free()
+				m.hud.visible = true
 		check(sup.radio_state == 1, "Stelle %d: Funkgerät gespawnt" % i)
 		if sup.radio_state == 1:
 			check(_radio_visible(sup), "Stelle %d: Modell sichtbar am Boden" % i, _radio_vis_detail(sup))

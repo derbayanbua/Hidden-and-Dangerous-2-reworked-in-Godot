@@ -25,6 +25,7 @@ var _sync_t := 0.0
 var _env_t := 0.0
 var _target_hour := -1.0
 var _state := {}
+var _old_night := String(Game.cli.get("nacht_alt", "0")) == "1"   ## Vergleichsbilder: Nachtlicht wie bis 0.12.1
 
 func _ready() -> void:
 	name = "Tageszeit"
@@ -53,7 +54,14 @@ func rebind() -> void:
 	if _env:
 		bind(_env, _sun)
 
+## Nacht läuft schneller ab (mehr Tag je Zyklus): Uhr-Faktor 1 am Tag bis NIGHT_SPEED in tiefer Nacht
+const NIGHT_SPEED := 2.5
+
+func _rate() -> float:
+	return 1.0 if _old_night else lerpf(1.0, NIGHT_SPEED, night_of(hour))
+
 func _process(delta: float) -> void:
+	delta *= _rate()
 	if cycle_min > 0.0:
 		hour = fposmod(hour + delta * 24.0 / (cycle_min * 60.0), 24.0)
 	if _target_hour >= 0.0:
@@ -118,28 +126,42 @@ func _apply(full: bool) -> void:
 	var to_sun := (horiz * cos(el) + Vector3.UP * sin(el)).normalized()
 	var moon := s <= -0.07
 	_state = {"hour": hour, "sun_sin": s, "daylight": day, "night": night, "lamp": lamp, "moon": moon, "to_sun": to_sun}
+	# Wetter (weather.gd, optional): Faktoren für Sonne, Umgebungslicht, Nebel; ohne Wetterknoten alles 1/0
+	var wx = mission.get("weather") if mission else null
+	var wf: Dictionary = wx.factors() if wx != null and wx.has_method("factors") else {}
+	var k_sun := float(wf.get("sun", 1.0))
+	var k_amb := float(wf.get("ambient", 1.0))
+	var k_fog := float(wf.get("fog", 1.0))
+	var grey := float(wf.get("grey", 0.0))
+	# Lampen gehen bei dunklem Wetter früher an
+	lamp = maxf(lamp, float(wf.get("lamp", 0.0)) * (1.0 - night))
+	_state["lamp"] = lamp
 	if _sun:
 		var to_light := -to_sun if moon else to_sun
 		_sun.global_basis = Basis.looking_at(-to_light, Vector3.UP if absf(to_light.y) < 0.98 else Vector3.FORWARD)
 		if moon:
 			_sun.light_color = Color(0.55, 0.62, 0.85)
-			_sun.light_energy = 0.08 * (1.0 - smoothstep(-0.15, -0.07, s))
+			_sun.light_energy = (0.08 if _old_night else 0.14) * (1.0 - smoothstep(-0.15, -0.07, s))   # Mondlicht (vorher 0,08/0,095: Nacht zu dunkel)
 		else:
 			_sun.light_color = Color(1.0, 0.58, 0.34).lerp(Color(1.0, 0.95, 0.88), smoothstep(0.0, 0.4, s))
 			_sun.light_energy = 0.16 * smoothstep(-0.07, -0.04, s) + 1.15 * smoothstep(-0.03, 0.35, s)
+		_sun.light_energy *= k_sun
 		_sun.visible = _sun.light_energy > 0.002
 	if mission and "light_factor" in mission:
 		mission.light_factor = lerpf(1.0, 0.5, night)     # Wahrnehmung: Nacht wie Nachtmissionen
 	if not full:
 		return
 	if _env:
-		var amb := Color(0.48, 0.56, 0.76).lerp(Color(0.62, 0.68, 0.78), day).lerp(Color(0.16, 0.20, 0.34), night)
-		_env.ambient_light_color = amb
-		_env.ambient_light_energy = lerpf(lerpf(0.34, 0.58, day), 0.16, night)
+		# Nacht etwas heller als bis 0.12.1 (Umgebung 0,16 → 0,24, Farbe leicht angehoben); KI-light_factor bleibt 0,5
+		var night_amb := Color(0.16, 0.20, 0.34) if _old_night else Color(0.25, 0.29, 0.42)
+		var amb := Color(0.48, 0.56, 0.76).lerp(Color(0.62, 0.68, 0.78), day).lerp(night_amb, night)
+		_env.ambient_light_color = amb.lerp(Color(0.55, 0.57, 0.60) * lerpf(1.0, 0.3, night), grey * 0.6)
+		_env.ambient_light_energy = lerpf(lerpf(0.34, 0.58, day), 0.16 if _old_night else 0.33, night) * k_amb
 		if not _base.is_empty():
 			var fc: Color = _base.fog_color
-			_env.fog_light_color = fc.lerp(Color(0.70, 0.75, 0.80), day).lerp(Color(0.035, 0.045, 0.075), night)
-			_env.fog_density = float(_base.fog_density) * lerpf(1.0, 0.65, day)
+			var fog_col := fc.lerp(Color(0.70, 0.75, 0.80), day).lerp(Color(0.035, 0.045, 0.075), night)
+			_env.fog_light_color = fog_col.lerp(Color(0.52, 0.55, 0.58) * lerpf(1.0, 0.12, night), grey * 0.7)
+			_env.fog_density = float(_base.fog_density) * lerpf(1.0, 0.65, day) * k_fog
 			var va: Color = _base.vol_albedo
 			_env.volumetric_fog_albedo = va.lerp(Color(0.75, 0.78, 0.82), day).lerp(Color(0.05, 0.06, 0.09), night)
 	if _sky_mat:

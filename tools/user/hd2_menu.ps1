@@ -473,7 +473,9 @@ function Action-Export {
   # Die Original-Installation wird nie beschrieben: Ziel darf nicht in ihr liegen
   $oFull = [IO.Path]::GetFullPath($Cfg.Orig).TrimEnd('\') + '\'
   $zFull = [IO.Path]::GetFullPath($Cfg.Ziel).TrimEnd('\') + '\'
-  if ($zFull.StartsWith($oFull, [StringComparison]::OrdinalIgnoreCase)) { Err (L "Ziel liegt in der Original-Installation ($($Cfg.Ziel)) – bitte einen anderen Ordner wählen (-Ziel)." "Target is inside the original installation ($($Cfg.Ziel)) – please choose another folder (-Ziel)."); return }
+  # Eigener Ordner orig_cache (kein Original-Ordner) ist auch innerhalb der Installation erlaubt (Spiel und Original im selben Ordner)
+  $ownCache = ((Split-Path $zFull.TrimEnd('\') -Leaf) -eq "orig_cache") -and ($zFull -ne $oFull)
+  if (-not $ownCache -and $zFull.StartsWith($oFull, [StringComparison]::OrdinalIgnoreCase)) { Err (L "Ziel liegt in der Original-Installation ($($Cfg.Ziel)) – bitte einen anderen Ordner wählen (-Ziel)." "Target is inside the original installation ($($Cfg.Ziel)) – please choose another folder (-Ziel)."); return }
   New-Item -ItemType Directory -Force $Cfg.Ziel, $LogDir | Out-Null
   $script:ExportLog = Join-Path $LogDir ("export_{0}.log" -f (Get-Date -Format "yyyyMMdd_HHmmss"))
   $script:State = New-Object 'System.Collections.Generic.HashSet[string]'

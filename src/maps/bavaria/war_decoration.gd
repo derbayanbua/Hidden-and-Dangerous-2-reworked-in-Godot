@@ -5,10 +5,12 @@ var m: Mission
 var lb: LevelBuilder
 var templates: RefCounted
 var sources := {}
+var relative_lib := {}          ## Originalpfad → eingesetztes Bibliotheksmodell
 var sites: Array[Dictionary] = []
 var missing: Array[String] = []
 var root: Node3D
 var layout_ratio := 1.0
+const LibraryModels := preload("res://src/maps/bavaria/library_models.gd")
 
 func _init(mission: Mission) -> void:
 	m = mission
@@ -56,6 +58,9 @@ func build() -> void:
 		["Geraeteplatz_Dorfrand",[352,924],0.1],
 		["Geraeteplatz_Ost",[1005,746],-0.7]]:
 		_garden(spec[0],spec[1],float(spec[2]))
+	if LibraryModels.enabled():
+		for spec in LibraryModels.EXTRAS:
+			_library_extra(spec[0],spec[1],spec[2],float(spec[3]),bool(spec[4]))
 	for source in sources.values():
 		if is_instance_valid(source):
 			source.free()
@@ -234,7 +239,14 @@ func _asset(relative: String) -> Node3D:
 	if not sources.has(relative):
 		var path := OrigLevel.cache_root()+"/"+relative+".glb"
 		sources[relative] = OrigLevel.parse_glb(path)
-		if sources[relative] == null:
+		# Projekteigenes Wrack/Aggregat bei passendem Grundriss (--lib_models=0 = Original)
+		var lib := LibraryModels.replacement(relative.get_file(), sources[relative], templates.mesh_bounds, LibraryModels.WRECKS)
+		if lib:
+			if sources[relative]:
+				(sources[relative] as Node3D).free()
+			sources[relative] = lib
+			relative_lib[relative] = LibraryModels.DIR + String(lib.get_meta("library_model")) + ".glb"
+		elif sources[relative] == null:
 			missing.append(path)
 			templates.missing.append(path)
 	if sources[relative] == null:
@@ -244,7 +256,7 @@ func _asset(relative: String) -> Node3D:
 	wrapper.add_child(content)
 	var bounds: AABB = templates.mesh_bounds(content,Transform3D.IDENTITY)
 	content.position -= Vector3(bounds.get_center().x,bounds.position.y,bounds.get_center().z)
-	wrapper.set_meta("source",relative)
+	wrapper.set_meta("source",relative_lib.get(relative,relative))
 	wrapper.set_meta("natural_size",bounds.size)
 	templates.reused_models += 1
 	return wrapper
@@ -272,6 +284,30 @@ func _wreck(id: String, ref: Array, model: String, yaw: float) -> void:
 		lb.box(Vector3(side*(size.x*0.5+0.25),0.02,(i-2)*0.4),Vector3(0.30,0.06,0.18),"old_steel",i*0.8,false,n)
 	# Nachprüfbare lokale Unterkörper-Deckungsstrahlen, keine Fahrzeugspielsysteme.
 	n.set_meta("cover_height",0.60 if model=="la_citr_vrak01" else 0.85)
+
+## Projekteigenes Modell als zusätzliche Ausstattung; Platz über dieselben Schutzregeln wie alle Gruppen.
+func _library_extra(id: String, model: String, ref: Array, yaw: float, collide: bool) -> void:
+	var content := LibraryModels.load_model(model)
+	if content == null:
+		missing.append(LibraryModels.DIR + model + ".glb")
+		return
+	var wrapper := Node3D.new()
+	wrapper.add_child(content)
+	var bounds: AABB = templates.mesh_bounds(content,Transform3D.IDENTITY)
+	content.position -= Vector3(bounds.get_center().x,bounds.position.y,bounds.get_center().z)
+	var size := bounds.size
+	var radius := Vector2(size.x,size.z).length()*0.5+0.3
+	var center := _site(ref,radius)
+	if not center.is_finite():
+		wrapper.free()
+		return
+	var n := _group(id,center,radius,size,yaw)
+	n.add_to_group("bavaria_library_props")
+	n.set_meta("source",LibraryModels.DIR + model + ".glb")
+	n.add_child(wrapper)
+	if collide:
+		templates._mesh_colliders(wrapper)
+	templates.reused_models += 1
 
 func _ground_patch(parent: Node3D, pos: Vector3, size: Vector3, material: String, irregular := false) -> void:
 	if not irregular:

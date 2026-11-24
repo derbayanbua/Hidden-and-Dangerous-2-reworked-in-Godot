@@ -608,7 +608,15 @@ class OrigDoor extends Interactable:
 		var out: Array[RID] = []
 		for b in frame.find_children("*", "CollisionObject3D", true, false):
 			out.append((b as CollisionObject3D).get_rid())
+		if frame is CollisionObject3D:
+			out.append((frame as CollisionObject3D).get_rid())
 		return out
+
+	## Sichtlinie Benutzen (Interactable.sight_clear): der Flügel liegt unter dynamic_root, nicht unter dem Türknoten.
+	## Seine Körper (StaticBody3D, z. B. DoorBody) dürfen nicht als Wand zählen – sonst verdeckt der geöffnete,
+	## weggedrehte Flügel den Prüfpunkt in der Öffnung und die Tür ließ sich nicht wieder schließen.
+	func own_colliders() -> Array[RID]:
+		return _own_rids()
 
 	## Flügelvolumen (je Mesh ein Kasten, 6 cm/15 cm geschrumpft) gegen Welt (Ebene 1) und Soldaten (Ebene 2)
 	func _overlaps(exclude: Array[RID], chars := true, only_chars := false) -> Array[RID]:
@@ -2072,6 +2080,10 @@ class OrigEmplacement extends Interactable:
 		if is_instance_valid(seat):
 			return seat.global_position
 		return frame.global_position + frame.global_basis.z.normalized() * 0.9
+
+	## Sichtlinienziel Benutzen (Interactable.sight_clear): der Schützenplatz
+	func interact_point() -> Vector3:
+		return gunner_spot()
 
 	func interact(s: Soldier) -> void:
 		if gunner == s:

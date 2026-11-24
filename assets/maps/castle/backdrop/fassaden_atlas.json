@@ -1,0 +1,38 @@
+{
+ "cols": 4,
+ "rows": 2,
+ "cells": [
+  {
+   "motiv": "sage_giebel",
+   "aspect": 1.25
+  },
+  {
+   "motiv": "lachs_klassizistisch",
+   "aspect": 1.2552
+  },
+  {
+   "motiv": "ocker_staffelgiebel",
+   "aspect": 1.2658
+  },
+  {
+   "motiv": "blau_barock",
+   "aspect": 1.3825
+  },
+  {
+   "motiv": "lindgruen_giebel",
+   "aspect": 1.25
+  },
+  {
+   "motiv": "pastellrosa",
+   "aspect": 1.2552
+  },
+  {
+   "motiv": "sand_ocker",
+   "aspect": 1.2658
+  },
+  {
+   "motiv": "lavendel_barock",
+   "aspect": 1.3825
+  }
+ ]
+}

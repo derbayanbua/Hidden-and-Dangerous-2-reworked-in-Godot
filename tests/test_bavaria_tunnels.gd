@@ -1,6 +1,7 @@
 extends Node
 ## Stollen + Suchturm der Karte Bavaria.
-## tools/godot.cmd --headless -- --mission=bavaria --autoplay=test_bavaria_tunnels [--phase=tunnel|tower|bunker|all]
+## tools/godot.cmd --headless -- --mission=bavaria --autoplay=test_bavaria_tunnels [--phase=tunnel|tower|bunker|reach|all] [--tag=]
+## reach: KI-Erreichbarkeit aller Spawns/Zonen/Häuser/Gräben/Stollen/Stellungen/Hochstände/Hinweise → bavaria_reach<tag>.txt
 ## Ausbau (11/2026): kurvige Gänge/Gefälle/Ausbrüche, Räume begehbar (Physiklauf), Zahlenschloss richtig/falsch über das
 ## Tastenfeld, Geheimraum begehbar, Knopf spielt „dö-dö“, Kreideziffern, Turmschalter an/aus, Sicherung 60–300 s Ausfall.
 ## Stollen: Aufbau, Bodenaussparungen ohne Lücken von oben, Navmesh im Stollen, echter Soldat läuft per Physik vom
@@ -36,11 +37,258 @@ func _run() -> void:
 	var phase := String(Game.cli.get("phase", "all"))
 	if phase in ["all", "tunnel"]:
 		await _tunnel()
+	if phase in ["all", "tunnel", "extra"]:
+		await _extras()
 	if phase in ["all", "tower"]:
 		await _tower()
 	if phase in ["all", "bunker"]:
 		await _bunker()
+	if phase in ["all", "reach"]:
+		_reach()
+	if phase in ["all", "reach", "fall"]:
+		await _fall_probe()
 	_finish()
+
+# --- Erreichbarkeit für die KI (Navmesh): Spawns, Zonen, Häuser, Gräben, Stollen, Stellungen, Hochstände ------------
+## Jeder Zielpunkt muss nahe am Netz liegen und vom ersten Spawn aus (Pfadsuche ohne Polygongrenze) erreichbar sein.
+## Bericht test_output/bavaria_reach<tag>.txt (Vorher/Nachher-Vergleich der KI-Navigation).
+
+func _reach() -> void:
+	var nav := m.get_world_3d().navigation_map
+	var lines: Array[String] = []
+	var targets: Array = []   # [kategorie, name, punkt]
+	var spawns: Array = []
+	for i in (m.layout["spawns"] as Array).size():
+		var p := _ground_at(m.pixel(m.layout["spawns"][i]["pixel"]))
+		spawns.append(p)
+		targets.append(["spawn", "spawn_%d" % i, p])
+	for z in m.mp_zones():
+		targets.append(["zone", String(z.name), _ground_at((z.xf as Transform3D).origin)])
+		for k in (z.get("slots", []) as Array).size():
+			targets.append(["spawn", "zone_%s_%d" % [String(z.name), k], _ground_at(z.slots[k].pos)])
+	for h in get_tree().get_nodes_in_group("bavaria_buildings"):
+		var house := h as Node3D
+		if house == null:
+			continue
+		var k := 0
+		for w in house.get_meta("shooting_windows", []):
+			var wl: Vector3 = w
+			targets.append(["haus_eg", "%s_fenster%d" % [house.name, k], house.to_global(Vector3(wl.x, 0.1, wl.z - signf(wl.z) * 0.7))])
+			k += 1
+		k = 0
+		for w in house.get_meta("og_shooting_windows", []):
+			var wl: Vector3 = w
+			targets.append(["haus_og", "%s_og%d" % [house.name, k], house.to_global(Vector3(wl.x, wl.y + 0.05, wl.z - signf(wl.z) * 0.7))])
+			k += 1
+		if String(house.name) == "haus_16":
+			targets.append(["haus_keller", "haus_16_keller", house.to_global(Vector3(-1.0, -2.3, 1.0))])
+	var fts := preload("res://src/maps/bavaria/field_trenches.gd")
+	for ti in fts.TRENCHES.size():
+		var line := fts.full_polyline(fts.TRENCHES[ti].points)
+		for k in line.size():
+			var ramp_end := k == 0 or k == line.size() - 1   # Rampenausgang auf Geländehöhe
+			targets.append(["graben", "graben%d_p%d" % [ti, k], Vector3(line[k].x, 0.0 if ramp_end else -fts.DEPTH, line[k].y)])
+	var t: RefCounted = m.tunnels
+	if t:
+		var jn: Vector2 = t.nodes["abzweig"]
+		targets.append(["stollen", "abzweig", Vector3(jn.x, t.floor_at(jn), jn.y)])
+		for id in t.entrances:
+			targets.append(["stollen", "zugang_" + String(id), t.entrances[id].approach])
+		for rm in t.rooms + ([t.secret] if not t.secret.is_empty() else []):
+			targets.append(["stollen", "raum_" + String(rm.get("id", "geheim")), Vector3(rm.c.x, t.floor_at(rm.c), rm.c.y)])
+		for id in t.extra:
+			var x: Dictionary = t.extra[id]
+			targets.append(["stollen", "zusatz_%s_aussen" % id, x.out[-1]])
+			targets.append(["stollen", "zusatz_%s_gang" % id, Vector3(x.join.x, t.floor_at(x.join), x.join.y)])
+		if is_instance_valid(t.get("nest_gun")):
+			targets.append(["stellung", "mg_nest", t.nest_gun.gunner_spot()])
+	for key in ["field_emplacement", "woodland_emplacement"]:
+		var holder = m.get(key)
+		if holder and is_instance_valid(holder.get("gun")):
+			targets.append(["stellung", key, holder.gun.gunner_spot()])
+	var sd = m.get("scene_details")
+	if sd:
+		for key in ["tree_stand", "antenna_stand"]:
+			var v = sd.get(key)
+			if v is Vector3 and v != Vector3.ZERO:
+				targets.append(["hochstand", key, v])
+	var hints: Array = m.bot_hints(Vector3.ZERO, 10000.0)
+	for i in hints.size():
+		targets.append(["hinweis_" + String(hints[i].kind), "hinweis%d" % i, hints[i].pos])
+	var ref: Vector3 = spawns[0]
+	var stats := {}
+	var bad: Array[String] = []
+	for tg in targets:
+		var cat: String = tg[0]
+		var p: Vector3 = tg[2]
+		var cp := NavigationServer3D.map_get_closest_point(nav, p)
+		var vt := 0.6 if cat in ["hochstand", "hinweis_high"] else 1.5   # Plattform selbst, nicht Dach/OG daneben
+		var on := Vector2(cp.x - p.x, cp.z - p.z).length() <= 1.2 and absf(cp.y - p.y) <= vt
+		var path := _qpath(nav, ref, cp)
+		var ok := on and path.size() > 0 and Vector2(path[-1].x - cp.x, path[-1].z - cp.z).length() < 1.0 and absf(path[-1].y - cp.y) < 1.0
+		var st: Array = stats.get(cat, [0, 0])
+		st[0] += 1
+		st[1] += int(ok)
+		stats[cat] = st
+		if not ok:
+			bad.append("UNERREICHBAR %s %s ziel=%s netz=%s (%.1f m) pfadende=%s" % [cat, tg[1], _v3(p), _v3(cp), cp.distance_to(p),
+				_v3(path[-1]) if path.size() > 0 else "-"])
+	# jeder Spawn zu jeder Zone (beide Richtungen)
+	var pairs := 0
+	var pairs_ok := 0
+	for s in spawns:
+		for z in m.mp_zones():
+			var zp := _ground_at((z.xf as Transform3D).origin)
+			for dir in 2:
+				var a: Vector3 = s if dir == 0 else zp
+				var b: Vector3 = zp if dir == 0 else s
+				var bp := NavigationServer3D.map_get_closest_point(nav, b)
+				var path := _qpath(nav, NavigationServer3D.map_get_closest_point(nav, a), bp)
+				pairs += 1
+				pairs_ok += int(path.size() > 0 and path[-1].distance_to(bp) < 1.0)
+	lines.append("spawn_zone_paare %d/%d" % [pairs_ok, pairs])
+	for l in m.ladder_links:
+		var ld = l.get_meta("ladder")
+		lines.append("leiter_link %s %s -> %s (Leiterkopf %s)" % [str(ld.name) if is_instance_valid(ld) else "?", _v3(l.start_position),
+			_v3(l.end_position), _v3(ld.top) if is_instance_valid(ld) else "-"])
+		if is_instance_valid(ld):
+			check(absf(l.end_position.y - (ld.top as Vector3).y) < 0.6 and Vector2(l.end_position.x - ld.top.x, l.end_position.z - ld.top.z).length() < 1.2,
+				"Leiter %s: Link endet auf der Plattform (%s, Kopf %s)" % [ld.name, _v3(l.end_position), _v3(ld.top)])
+	check(m.ladder_links.size() >= 2, "Leiter-Links Baumstand + Antenne (%d)" % m.ladder_links.size())
+	# Unerreichbare Netzbereiche: jedes Polygon (Mittelpunkt) vom ersten Spawn aus; Gruppen je 4-m-Raster/Höhenstufe
+	var npoly := 0
+	var lost := {}
+	var lost_n := 0
+	var rp := NavigationServer3D.map_get_closest_point(nav, ref)
+	for reg in m.find_children("*", "NavigationRegion3D", true, false):
+		var nm: NavigationMesh = (reg as NavigationRegion3D).navigation_mesh
+		if nm == null:
+			continue
+		var verts := nm.get_vertices()
+		for pi in nm.get_polygon_count():
+			var poly := nm.get_polygon(pi)
+			var c := Vector3.ZERO
+			for vi in poly:
+				c += verts[vi]
+			c = (reg as Node3D).global_transform * (c / poly.size())
+			npoly += 1
+			var path := _qpath(nav, rp, c)
+			if path.size() == 0 or path[-1].distance_to(c) > 0.8:
+				lost_n += 1
+				var key := "%d,%d,%d" % [floori(c.x / 4.0), floori(c.y / 1.5), floori(c.z / 4.0)]
+				var e: Array = lost.get(key, [c, 0])
+				e[1] += 1
+				lost[key] = e
+	var lk: Array = lost.values()
+	var low: Array = lk.filter(func(e): return (e[0] as Vector3).y < 2.6)   # Boden/EG/Gräben/Stollen (darüber: Dächer)
+	var low_n := 0
+	for e in low:
+		low_n += int(e[1])
+	lines.append("netz_polygone %d, vom Spawn unerreichbar %d (%d Bereiche), davon unter 2,6 m Höhe %d (%d Bereiche)" % [npoly,
+		lost_n, lost.size(), low_n, low.size()])
+	low.sort_custom(func(a, b): return int(a[1]) > int(b[1]))
+	for e in low:
+		lines.append("  INSEL_UNTEN %s polygone=%d" % [_v3(e[0]), e[1]])
+	var keys := stats.keys()
+	keys.sort()
+	var tot := 0
+	var tot_ok := 0
+	for c in keys:
+		lines.append("%-22s %d/%d erreichbar" % [c, stats[c][1], stats[c][0]])
+		tot += int(stats[c][0])
+		tot_ok += int(stats[c][1])
+	lines.append("gesamt %d/%d, Hinweise verworfen beim Heften: %d" % [tot_ok, tot, int(m.bot_hint_data.dropped) if m.bot_hint_data else -1])
+	lines.append_array(bad)
+	for l in lines:
+		print("BAVREACH ", l)
+	var f := FileAccess.open(ProjectSettings.globalize_path("res://test_output/bavaria_reach%s.txt" % String(Game.cli.get("tag", ""))), FileAccess.WRITE)
+	if f:
+		f.store_string("\n".join(lines) + "\n")
+	check(pairs_ok == pairs, "Jeder Spawn erreicht jede Zone und zurück (%d/%d)" % [pairs_ok, pairs])
+	for c in keys:
+		check(int(stats[c][1]) == int(stats[c][0]), "Erreichbar für die KI: %s %d/%d" % [c, stats[c][1], stats[c][0]])
+
+## Durchfallprobe (Bot-Messlauf: Bot fiel am Reihenhaus-Einstieg unter die Stollensohle): Soldaten in allen drei Haltungen
+## über jedem Treppenschacht (offener und überdeckter Teil bis zum Austritt) fallen lassen bzw. hineinlaufen lassen.
+func _fall_probe() -> void:
+	var rects: Array = []
+	for e in Tunnels.ENTRANCES:
+		var f := Tunnels.house_frame(m, e.building)
+		if f.is_empty():
+			continue
+		var dims := Tunnels.stair_dims(e)
+		rects.append([String(e.id), Tunnels._to_world(f[0], Tunnels._local_rect(e, -0.3, dims.length + Tunnels.LANDING + 0.5, float(e.width) * 0.5 + 0.1))])
+	for e0 in Tunnels.EXTRA_SITES:
+		var e := Tunnels.extra_site(e0)
+		var ln: float = float(e.length) if String(e.kind) == "rubble" else float(Tunnels.stair_dims(e).length)
+		rects.append([String(e.id), Tunnels._local_rect(e, -0.3, ln + Tunnels.LANDING + 0.5, float(e.width) * 0.5 + 0.1)])
+	var pts: Array = []
+	for r in rects:
+		var poly: PackedVector2Array = r[1]
+		var lo := Vector2(INF, INF)
+		var hi := -lo
+		for q in poly:
+			lo = lo.min(q)
+			hi = hi.max(q)
+		var x := lo.x
+		while x <= hi.x:
+			var z := lo.y
+			while z <= hi.y:
+				if Geometry2D.is_point_in_polygon(Vector2(x, z), poly):
+					var h := _ray(Vector3(x, 1.5, z), Vector3(x, -6.0, z))
+					if not h.is_empty():
+						pts.append([r[0], (h.position as Vector3) + Vector3.UP * 0.6])
+						# Versatz knapp IN die Sohle (Notversatz/Step-down auf einen Netzpunkt einige cm unter der Kollision):
+						# die Figur muss nach oben herausgedrückt werden, nicht durch die Sohle fallen
+						if absf((h.position as Vector3).y - Tunnels.FLOOR_Y) < 0.05:
+							pts.append([String(r[0]) + "/in_sohle", (h.position as Vector3) + Vector3.DOWN * 0.07])
+				z += 0.45
+			x += 0.45
+	var fails: Array[String] = []
+	var n := 0
+	for stance in [Soldier.Stance.STAND, Soldier.Stance.CROUCH, Soldier.Stance.PRONE]:
+		var i := 0
+		while i < pts.size():
+			var batch: Array = []
+			for k in mini(24, pts.size() - i):
+				var s := Soldier.new()
+				s.name = "Fallprobe"
+				m.actors_root.add_child(s)
+				s.global_position = pts[i + k][1]
+				s.stance_request = stance
+				s.look_yaw = randf() * TAU
+				s.move_input = Vector3(randf_range(-1, 1), 0, randf_range(-1, 1)).normalized()
+				batch.append([s, pts[i + k]])
+			for _f in 150:
+				await get_tree().physics_frame
+			for b in batch:
+				var s: Soldier = b[0]
+				n += 1
+				if s.global_position.y < Tunnels.FLOOR_Y - 0.4:
+					fails.append("%s Haltung %d Start %s Ende %s" % [b[1][0], stance, _v3(b[1][1]), _v3(s.global_position)])
+				s.queue_free()
+			i += 24
+			await get_tree().physics_frame
+	for f in fails.slice(0, 20):
+		print("DURCHFALL ", f)
+	check(n > 100 and fails.is_empty(), "Treppenschächte: kein Durchfallen unter die Stollensohle (%d/%d Proben, 3 Haltungen, laufend)" % [fails.size(), n])
+
+func _ground_at(p: Vector3) -> Vector3:
+	var h := _ray(p + Vector3.UP * 3.0, p + Vector3.DOWN * 10.0)
+	return h.position if not h.is_empty() else p
+
+func _qpath(nav: RID, a: Vector3, b: Vector3) -> PackedVector3Array:
+	var q := NavigationPathQueryParameters3D.new()
+	q.map = nav
+	q.start_position = a
+	q.target_position = b
+	q.path_search_max_polygons = 0
+	var r := NavigationPathQueryResult3D.new()
+	NavigationServer3D.query_path(q, r)
+	return r.path
+
+func _v3(p: Vector3) -> String:
+	return "(%.1f, %.1f, %.1f)" % [p.x, p.y, p.z]
 
 # --- Stollen ----------------------------------------------------------------------------------------------------
 
@@ -146,6 +394,170 @@ func _tunnel() -> void:
 		var res: Dictionary = await _walk(mg.approach, route)
 		check(res.reached, "Soldat läuft vom MG42-Einstieg zu %s (Ende %s, Ziel %s, %.1f s)" % [target, str(res.end), str(route[-1] if not route.is_empty() else null), res.time])
 		check(res.min_y > Tunnels.FLOOR_Y - 0.4 and res.min_y < Tunnels.FLOOR_Y + 0.5, "%s: Weg unter Tage, kein Durchfallen (tiefster Punkt %.2f)" % [target, res.min_y])
+
+# --- Ausbau 2: MG-Nest, Einsturzgang, Luke -----------------------------------------------------------------------
+
+func _polydist(a: PackedVector2Array, b: PackedVector2Array) -> float:
+	if not Geometry2D.intersect_polygons(a, b).is_empty():
+		return 0.0
+	var best := INF
+	for p in a:
+		best = minf(best, Tunnels._dist_poly(p, b))
+	for p in b:
+		best = minf(best, Tunnels._dist_poly(p, a))
+	return best
+
+func _extras() -> void:
+	var t: RefCounted = m.tunnels
+	check(t.extra.size() == 3 and t.extra.has("mg_nest") and t.extra.has("einsturz") and t.extra.has("luke"),
+		"Zusatzzugänge MG-Nest, Einsturzgang, Luke (%s)" % str(t.extra.keys()))
+	var nav := m.get_world_3d().navigation_map
+	var own: Array = Tunnels.footprints(m)
+	var fts := preload("res://src/maps/bavaria/field_trenches.gd")
+	for id in t.extra:
+		var x: Dictionary = t.extra[id]
+		var surf: PackedVector2Array = x.surface
+		var u: Vector3 = x.u3
+		var v := Vector3(-u.z, 0, u.x)
+		var head: Vector3 = x.head
+		var half: float = float(x.width) * 0.5
+		# Platz: Gebäude, Wege, Spawns, Zonen, Gräben/Erdwälle, andere Zugänge
+		var d_house := INF
+		for f in m.building_footprints:
+			var is_own := false
+			for o in own:
+				is_own = is_own or ((o as PackedVector2Array).size() == f.size() and (o[0] as Vector2).distance_to(f[0]) < 0.01)
+			if not is_own:
+				d_house = minf(d_house, _polydist(surf, f))
+		var d_road := INF
+		for road in m.layout["paths"]:
+			var pts: Array = road["points"]
+			for i in pts.size() - 1:
+				var a3: Vector3 = m.pixel(pts[i])
+				var b3: Vector3 = m.pixel(pts[i + 1])
+				for k in 21:
+					var q := Vector2(a3.x, a3.z).lerp(Vector2(b3.x, b3.z), k / 20.0)
+					d_road = minf(d_road, Tunnels._dist_poly(q, surf) - float(road.width) * 0.5)
+		var d_spawn := INF
+		for sp in m.layout["spawns"]:
+			var p: Vector3 = m.pixel(sp["pixel"])
+			d_spawn = minf(d_spawn, Tunnels._dist_poly(Vector2(p.x, p.z), surf))
+		for z in m.layout.get("occupation_zones", []):
+			var p: Vector3 = m.pixel(z["pixel"])
+			d_spawn = minf(d_spawn, Tunnels._dist_poly(Vector2(p.x, p.z), surf))
+		var d_field := INF
+		for h in fts.hole_polygons():
+			d_field = minf(d_field, _polydist(surf, h))
+		for cv in fts.COVERS:
+			d_field = minf(d_field, Tunnels._dist_poly(cv[1], surf) - 1.0)
+		var d_other := INF
+		for o in own:
+			if (o as PackedVector2Array) != surf:
+				d_other = minf(d_other, _polydist(surf, o))
+		check(d_house >= 2.0 and d_road >= 0.8 and d_spawn >= 7.0 and d_field >= 2.0 and d_other >= 5.0,
+			"%s: Platz zu Gebäuden %.1f / Wegen %.1f / Spawns+Zonen %.1f / Gräben+Erdwällen %.1f / anderen Zugängen %.1f m" % [id, d_house, d_road, d_spawn, d_field, d_other])
+		# Loch offen, ringsum tragender Boden bzw. Rand
+		var probe: Vector3 = head + u * 0.75
+		var hit := _ray(probe + Vector3.UP * 1.5, probe + Vector3.DOWN * 6.0)
+		check(not hit.is_empty() and hit.position.y < -0.15 and hit.position.y > Tunnels.FLOOR_Y, "%s: Öffnung frei, darunter Stufe/Schutt (y=%s)" % [id, str(hit.get("position", Vector3.INF).y)])
+		var gaps := 0
+		var open_l: float = x.open_length
+		for side in [-1.0, 1.0]:
+			for s in [0.4, open_l * 0.5, open_l - 0.3]:
+				var p: Vector3 = head + u * s + v * side * (half + 0.45)
+				var h := _ray(p + Vector3.UP * 1.2, p + Vector3.DOWN * 3.0)
+				if h.is_empty() or h.position.y < -0.05:
+					gaps += 1
+		check(gaps == 0, "%s: kein Durchfallen neben der Öffnung (%d/6 ohne Boden)" % [id, gaps])
+		# Navmesh: KI-Weg vom Abzweig hinaus ins Freie
+		var out_p: Vector3 = x.out[-1]
+		var jn: Vector2 = t.nodes["abzweig"]
+		var path := NavigationServer3D.map_get_path(nav, Vector3(jn.x, Tunnels.FLOOR_Y, jn.y), out_p, true)
+		check(path.size() > 1 and path[-1].distance_to(out_p) < 0.8, "%s: KI-Weg Stollen → ins Freie (Ende %s)" % [id, str(path[-1] if path.size() > 0 else null)])
+		# Physik: hinauf (vom MG42-Einstieg) und von außen hinab
+		var route: Array = t.walk_route(id)
+		var res: Dictionary = await _walk(t.entrances["mg42"].approach, route)
+		check(res.reached, "%s: Soldat läuft vom MG42-Einstieg durch den Stollen hinaus (Ende %s, %.1f s)" % [id, str(res.end), res.time])
+		check(res.min_y > Tunnels.FLOOR_Y - 0.4, "%s: kein Durchfallen (tiefster Punkt %.2f)" % [id, res.min_y])
+		var down: Array = (x.out as Array).duplicate()
+		down.reverse()
+		down = down.slice(1)
+		down.append_array([x.top, x.bottom, Vector3(x.join.x, t.floor_at(x.join), x.join.y)])
+		var res2: Dictionary = await _walk(out_p, down)
+		check(res2.reached and res2.min_y > Tunnels.FLOOR_Y - 0.4, "%s: von außen hinab bis in den Gang (Ende %s, %.1f s)" % [id, str(res2.end), res2.time])
+		# Licht: keine Lampe unter der offenen Stelle, alle unter Tage
+		var lit := 0
+		for l in t.lamps:
+			var lp: Vector3 = l.global_position
+			if lp.y > -0.3 or Geometry2D.is_point_in_polygon(Vector2(lp.x, lp.z), x.hole):
+				lit += 1
+		check(lit == 0, "%s: keine Stollenlampe unter der Öffnung oder über Tage (%d)" % [id, lit])
+		match String(x.kind):
+			"nest":
+				var gun = t.nest_gun
+				check(gun != null and is_instance_valid(gun), "MG-Nest: bedienbares MG42 (OrigEmplacement)")
+				if gun == null:
+					continue
+				var fwd: Vector3 = -gun.frame.global_basis.z
+				fwd.y = 0
+				check(rad_to_deg(fwd.normalized().angle_to(-u)) < 3.0, "MG-Nest: Waffe zeigt ins Gelände")
+				var gp: Vector3 = gun.gunner_spot()
+				check(Vector2(gp.x - head.x, gp.z - head.z).length() < 1.2, "MG-Nest: Bedienplatz am Treppenkopf %s" % str(gp))
+				var free := 0
+				var near_min := INF
+				for a in [-25.0, -12.0, 0.0, 12.0, 25.0]:
+					var d := (-u).rotated(Vector3.UP, deg_to_rad(a))
+					var o: Vector3 = gun.frame.global_position + Vector3.UP * 1.3 + d * 1.6
+					var rh := _ray(o, o + d * 40.0)
+					var dist: float = 40.0 if rh.is_empty() else o.distance_to(rh.position)
+					near_min = minf(near_min, dist)
+					free += int(dist >= 20.0)
+				check(free >= 3 and near_min >= 8.0, "MG-Nest: Schussfeld ins Gelände (%d/5 Strahlen ≥ 20 m, kürzester %.1f m)" % [free, near_min])
+				var ph: float = gun.frame.get_parent().get_meta("parapet_height", 0.0)
+				var pr := _ray(head - u * 6.0 + Vector3.UP * (ph * 0.5), head - u * 1.0 + Vector3.UP * (ph * 0.5))
+				check(not pr.is_empty() and String(pr.collider.get_path()).contains("Treppe_mg_nest") and ph >= 0.6,
+					"MG-Nest: Sandsack-Brustwehr mit Kollision (%.2f m, Treffer %s)" % [ph, str(pr.get("collider", null))])
+				var s := Soldier.new()
+				s.name = "NestSchuetze"
+				m.actors_root.add_child(s)
+				s.global_position = gp + Vector3.UP * 0.1
+				await _frames(3)
+				gun.interact(s)
+				await _frames(3)
+				check(gun.gunner == s, "MG-Nest: Soldat besetzt das MG (Benutzen)")
+				if gun.gunner == s:
+					gun.dismount()
+				s.queue_free()
+				var hints: Array = m.bot_hints(head, 4.0)
+				check(hints.any(func(hh): return hh.kind == "emplacement"), "MG-Nest: Bot-Hinweis Waffenstellung")
+			"rubble":
+				var ramp: Node = t.root.find_child("Schuttrampe", true, false)
+				var slope: float = ramp.get_meta("slope_deg", 90.0) if ramp else 90.0
+				check(ramp != null and slope <= 32.0, "Einsturzgang: Schuttrampe begehbar (%.1f°)" % slope)
+				var mid: Vector3 = head + u * (float(x.length) * 0.5)
+				var mh := _ray(mid + Vector3.UP * 2.0, mid + Vector3.DOWN * 6.0)
+				var expect := Tunnels.FLOOR_Y * 0.5
+				check(not mh.is_empty() and absf(mh.position.y - expect) < 0.25, "Einsturzgang: Rampe trägt (y=%s, erwartet %.2f)" % [str(mh.get("position", Vector3.INF).y), expect])
+			"hatch":
+				var lp: Vector3 = head + u * (open_l * 0.5) + v * 1.4 + Vector3.UP * 0.3
+				var lh := _ray(lp, lp - v * 1.2)
+				check(not lh.is_empty() and String(lh.collider.get_parent().name).begins_with("Lukenfluegel"), "Luke: Lukenflügel mit Kollision (%s)" % str(lh.get("collider", null)))
+				check(float(x.length) - Tunnels.LANDING <= 4.1, "Luke: Treppe im Maß der Haustreppen (%.2f m Lauf)" % (float(x.length) - Tunnels.LANDING))
+
+	# Texturfehler Bienenstöcke (am Zugang): flache Normalen statt über Ecken gemittelter (Schattenakne)
+	var bee: Node3D = null
+	for n in get_tree().get_nodes_in_group("bavaria_decorations"):
+		if String(n.name).contains("Bienen"):
+			bee = n
+	var diag := 0
+	var total := 0
+	if bee:
+		for mi in bee.find_children("*", "MeshInstance3D", true, false):
+			var arr: Array = (mi as MeshInstance3D).mesh.surface_get_arrays(0)
+			for nrm in (arr[Mesh.ARRAY_NORMAL] as PackedVector3Array):
+				total += 1
+				diag += int(maxf(absf(nrm.x), maxf(absf(nrm.y), absf(nrm.z))) < 0.99)
+	check(bee != null and total > 0 and diag == 0, "Bienenstöcke: flache Flächennormalen (%d/%d schräg)" % [diag, total])
 
 func _walk(start: Vector3, route: Array) -> Dictionary:
 	var soldier := Soldier.new()
@@ -307,10 +719,48 @@ func _tower() -> void:
 	check(h.mode == 2 and h.target == null, "Nach Sichtverlust: Nachsuchen an der letzten Stelle (Modus %d)" % h.mode)
 	await get_tree().create_timer(Tower.RESEARCH_S + 0.5).timeout
 	check(h.mode == 0, "Danach wieder Suchen (Modus %d, Ziel %s %s)" % [h.mode, str(h.target.name) if h.target else "-", str(h.target.global_position) if h.target else ""])
+	await _house_blocks_beam(tw, h, soldier)
 	dn.set_hour(12.0, 0.0)
 	await _frames(5)
 	check(not tw.active and not h.light.visible and m.light_at(spot + Vector3.UP) < 1.6, "Bei Tag wieder aus")
 	soldier.queue_free()
+
+## Kegel durch ein Haus gerichtet: sichtbarer Kegel endet an der Hauswand, Soldat dahinter wird nicht erfasst
+func _house_blocks_beam(tw, h, soldier: Soldier) -> void:
+	var origin: Vector3 = h.light.global_position
+	var best: Node3D = null
+	var best_d := INF
+	for b in get_tree().get_nodes_in_group("bavaria_buildings"):
+		var d: float = Vector2(b.global_position.x - origin.x, b.global_position.z - origin.z).length()
+		if d > 12.0 and d < 70.0 and d < best_d:
+			var probe: Vector3 = b.global_position + Vector3.UP * 1.5
+			var hit := _ray(origin, probe)
+			if not hit.is_empty() and hit.collider and (hit.collider as Node).get_parent() != null:
+				best = b
+				best_d = d
+	check(best != null, "Haus im Schwenkbereich des Turms gefunden")
+	if best == null:
+		return
+	var center: Vector3 = best.global_position + Vector3.UP * 1.2
+	var behind: Vector3 = center + Vector3(center.x - origin.x, 0, center.z - origin.z).normalized() * 12.0
+	var g := _ray(behind + Vector3.UP * 3.0, behind + Vector3.DOWN * 3.0)
+	if not g.is_empty():
+		behind = g.position + Vector3.UP * 1.0
+	tw.process_mode = Node.PROCESS_MODE_DISABLED
+	var to: Vector3 = behind - h.global_position
+	h.yaw = atan2(-to.x, -to.z)
+	h.pitch = atan2(to.y, Vector2(to.x, to.z).length())
+	h.rotation = Vector3(h.pitch, h.yaw, 0)
+	await get_tree().physics_frame
+	var wq := PhysicsRayQueryParameters3D.create(origin, behind, 1, tw.exclude)   # ohne Turmgerüst (wie der Kegel)
+	var wall := m.get_world_3d().direct_space_state.intersect_ray(wq)
+	var wall_d: float = origin.distance_to(wall.position) if not wall.is_empty() else INF
+	var cone_len: float = tw.cone_length(h)
+	check(not wall.is_empty() and cone_len <= wall_d + 0.05, "Sichtbarer Kegel endet an der Hauswand (%.1f m, Wand %.1f m)" % [cone_len, wall_d])
+	soldier.global_position = behind + Vector3.DOWN * 1.0
+	await get_tree().physics_frame
+	check(not tw.in_beam(h, behind), "Soldat hinter dem Haus wird nicht erfasst")
+	tw.process_mode = Node.PROCESS_MODE_INHERIT
 
 # --- Geheimraum, Zahlenschloss, Turmschalter, Sicherung ------------------------------------------------------------
 

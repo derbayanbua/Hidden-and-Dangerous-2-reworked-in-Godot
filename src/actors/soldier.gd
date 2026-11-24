@@ -1971,9 +1971,11 @@ func die(attacker: Node = null, direction := Vector3.ZERO) -> void:
 	# Todesschrei (speech.set Ereignis 115 „Death“) und Körperfall (Kat. 0/44 „Uni Bodyfall“, nach 0,7 s = Annahme)
 	set_meta("_speech_until", -1.0)
 	OrigAudio.speak_event(self, OrigAudio.EV_DEATH)
+	var me: WeakRef = weakref(self)      # 0.12.2: Leiche kann vorher frei sein (Respawn/Kartenwechsel) / may be freed first
 	get_tree().create_timer(0.7, false).timeout.connect(func():
-		if is_instance_valid(self):
-			OrigAudio.play_group(OrigAudio.CAT_STEP, OrigAudio.STEP_BODYFALL, global_position))
+		var o = me.get_ref()
+		if o != null and is_instance_valid(o) and o.is_inside_tree():
+			OrigAudio.play_group(OrigAudio.CAT_STEP, OrigAudio.STEP_BODYFALL, o.global_position))
 	died.emit(self)
 	Events.soldier_died.emit(self, attacker)
 

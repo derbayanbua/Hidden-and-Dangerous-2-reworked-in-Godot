@@ -489,6 +489,9 @@ Action_Export() {
   # Die Original-Installation wird nie beschrieben: Ziel darf nicht in ihr liegen
   local oFull zFull
   oFull="$(realpath -m "$CFG_ORIG")/"; zFull="$(realpath -m "$CFG_ZIEL")/"
+  # Eigener Ordner orig_cache (kein Original-Ordner) ist auch innerhalb der Installation erlaubt, z. B. wenn
+  # Spiel und Original im selben Ordner liegen; Originaldateien werden dabei nicht beschrieben.
+  [ "$(basename "${zFull%/}")" = "orig_cache" ] && [ "$zFull" != "$oFull" ] && oFull="//nie-gleich//"
   case "$zFull" in "$oFull"*) Err "$(L "Ziel liegt in der Original-Installation ($CFG_ZIEL) – bitte einen anderen Ordner wählen (--ziel)." "Target is inside the original installation ($CFG_ZIEL) – please choose another folder (--ziel).")"; return 1 ;; esac
   mkdir -p "$CFG_ZIEL" "$LOG_DIR"
   EXPORT_LOG="$LOG_DIR/export_$(date +%Y%m%d_%H%M%S).log"; : > "$EXPORT_LOG"

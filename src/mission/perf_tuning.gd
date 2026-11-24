@@ -132,8 +132,8 @@ static func _generate_lods(roots: Array) -> Dictionary:
 					mi.mesh = done[am]
 				continue
 			done[am] = null
-			if am.get_blend_shape_count() > 0:
-				continue
+			if am.get_blend_shape_count() > 0 or am.has_meta("no_auto_lod"):
+				continue      # no_auto_lod: Mesh mit eigener Detailstufe (z. B. Laubbüschel – Vereinfachung verschmiert die UVs)
 			var verts := 0
 			var ok := true
 			for s in am.get_surface_count():

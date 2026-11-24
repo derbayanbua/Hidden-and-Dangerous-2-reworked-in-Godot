@@ -12,7 +12,12 @@ extends MeshInstance3D
 const RADIUS := 260.0
 const EYE_Y := 1.4             ## Bildhorizont = Augenhöhe über dem Außenboden (−0,30 m) + 1,7 m
 const BOTTOM_Y := -8.0         ## Unterkante unter dem Außenboden (kein Spalt)
-const TOP_ELEV_DEG := 12.0     ## Oberkante [°] über dem Horizont (höchste Bildzeile ≈ 7° × zoom 1,6), darüber weich ausgeblendet
+const TOP_ELEV_DEG := 18.5     ## Oberkante [°] über dem Horizont (Südgipfel bis ≈ 17°, übrige Streifen ≈ 7° × zoom 1,6)
+## Südstreifen (Alpenkette über Tal, Himmel transparent, Ränder weich; erzeugt aus panorama/source), ersetzt im Ring das
+## blasse Alpenband. params = (Augenhöhe als Bildzeile v, v je Radiant, u je Radiant, u der Südrichtung), ohne Zoom:
+## 3064×600 px über 120° (±60°), gleicher Maßstab waagrecht/senkrecht; Talboden knapp unter Augenhöhe, Gipfel ≈ 13–17°.
+const FAR_SOUTH := "res://assets/maps/bavaria/panorama/panorama_south.png"
+const FAR_SOUTH_P := Vector4(0.7667, 2.439, 0.4775, 0.5)
 const SEGMENTS := 256
 const SKY_S := 0.5
 var mission: Node
@@ -26,7 +31,7 @@ func build(m: Node, env: Environment) -> bool:
 	mission = m
 	name = "Panoramaring"
 	_sky_mat = env.sky.sky_material as ShaderMaterial if env and env.sky else null
-	if _sky_mat == null or not bool(_sky_mat.get_shader_parameter("far_enabled")):
+	if _sky_mat == null or _sky_mat.get_shader_parameter("far_enabled") != true:
 		return false
 	var b: PackedVector2Array = m.boundary
 	for q in b:
@@ -42,6 +47,10 @@ func build(m: Node, env: Environment) -> bool:
 		if v != null:
 			material.set_shader_parameter(k, v)
 	material.set_shader_parameter("south_enabled", _sky_mat.get_shader_parameter("panorama") != null)
+	if ResourceLoader.exists(FAR_SOUTH):
+		material.set_shader_parameter("far_south", load(FAR_SOUTH))
+		material.set_shader_parameter("far_south_p", FAR_SOUTH_P)
+		material.set_shader_parameter("far_south_enabled", true)
 	material.set_shader_parameter("ring_center", Vector3(center.x, EYE_Y, center.y))
 	material.set_shader_parameter("top_fade", deg_to_rad(TOP_ELEV_DEG))
 	mesh = _cylinder()
@@ -87,7 +96,7 @@ func _process(delta: float) -> void:
 func _sync() -> void:
 	if _sky_mat == null or material == null:
 		return
-	for k in ["daylight", "night", "sun_direction"]:
+	for k in ["daylight", "night", "sun_direction", "overcast", "rain_haze"]:
 		var v = _sky_mat.get_shader_parameter(k)
 		if v != null:
 			material.set_shader_parameter(k, v)

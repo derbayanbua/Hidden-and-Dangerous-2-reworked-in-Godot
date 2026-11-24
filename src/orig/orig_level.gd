@@ -861,7 +861,9 @@ static func _vol(b: AABB) -> float:
 ## Nur für die Karten mit belegt verkehrt gewickelten Böden (`FLOOR_FLIP_MAPS`): kartenweit umgedreht wurden auch echte
 ## Decken-/Dach-/Überhang-Untersichten zu begehbaren Recast-Flächen (ARCTIC1-Arena: test_bots Deckungsfeuer ohne
 ## Niederhalten/Stellungswechsel, Abstand und HD2-Aufgaben-Zielerreichung rot). `--klz_floor_flip_all` = alle Karten.
-const FLOOR_FLIP_MAPS := ["normandy2_mp_zone", "czech2_mp_zone"]
+## B-060 (23.11.2026): normandy2b_mp_zone (gleiche Geometrie wie normandy2), czech3_mp/czech3_obj – ohne Umdrehen
+## test_mp_nav 76/71→80/74 bzw. 30/28→32/29, 37→38 Punkte.
+const FLOOR_FLIP_MAPS := ["normandy2_mp_zone", "czech2_mp_zone", "normandy2b_mp_zone", "czech3_mp", "czech3_obj"]
 
 
 func _floor_flip_map() -> bool:

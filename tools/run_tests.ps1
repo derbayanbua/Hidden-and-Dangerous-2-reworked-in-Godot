@@ -60,6 +60,7 @@ $suites = @(
   @{ name = "test_mp_classes"; args = "--headless -- --mission=m01_funkfeuer --autoplay=test_mp_classes" },
   @{ name = "test_ui_flow";  args = "--headless -- --autoplay=test_ui_flow --profiles_dir=user://test_ui_flow --noimport" },
   @{ name = "test_range_menu"; args = "--headless -- --autoplay=test_range_menu --profiles_dir=user://test_range_menu --noimport"; timeout = 600 },   # 0.11.8 Schiessstand im SP-Menue
+  @{ name = "test_custom_maps"; args = "--headless -- --autoplay=test_custom_maps --custom_maps_dir=user://test_custom_maps --profiles_dir=user://test_custom_maps_p --noimport"; timeout = 600 },   # Eigene Karten (.pck): Vorlage, Manifest, Menue, Pruefsumme
   @{ name = "test_language"; args = "--headless -- --autoplay=test_language --profiles_dir=user://test_language --noimport" },
   @{ name = "test_b022b";    args = "--headless -- --autoplay=test_b022b --profiles_dir=user://test_b022b --noimport" },
   @{ name = "test_tactical"; args = "--headless -- --mission=m01_funkfeuer --autoplay=test_tactical" },
@@ -87,7 +88,7 @@ $suites = @(
   @{ name = "test_no2_final"; args = "--headless -- --mission=no2_schwerttaenzer --autoplay=test_no2_final --test_timeout=900"; timeout = 1200 },
   @{ name = "test_af6";     args = "--headless -- --mission=af6_raubvoegel --autoplay=test_af6" },
   @{ name = "test_af1_fuel_tanks"; args = "--headless -- --mission=af1_spaghetti_airport --autoplay=test_af1_fuel_tanks"; timeout = 1700 },   # Treibstofftanks: Kollision/Navmesh/Zerstörung (Mischmaterial-Meshes)
-  @{ name = "test_af1_finale"; args = "--headless -- --mission=af1_spaghetti_airport --autoplay=test_af1_finale" },
+  @{ name = "test_af1_finale"; args = "--headless -- --mission=af1_spaghetti_airport --autoplay=test_af1_finale --test_timeout=900"; timeout = 1200 },   # Laden ~80 s + Beobachtung bis 200 s Spielzeit + Abschluss ~40 s: festes 360-s-Netz zu knapp unter Last
   @{ name = "test_af_air";   args = "--headless -- --mission=af2_flugschau --autoplay=test_af_air" },
   @{ name = "test_af2";      args = "--headless -- --mission=af2_flugschau --autoplay=test_af2" },   # 0.11.9 AFRICA2 Gegner/Bordschuetze/Flugzeug
   @{ name = "test_items";    args = "--headless -- --mission=af1_spaghetti_airport --autoplay=test_items" },
@@ -165,12 +166,20 @@ $suites = @(
   @{ name = "test_bavaria_ground_mg42"; args = "--headless -- --mission=bavaria_occupation --autoplay=test_bavaria_ground_mg42"; timeout = 1200 },
   @{ name = "test_bavaria_clipping"; args = "--headless -- --mission=bavaria --autoplay=test_bavaria_clipping"; timeout = 1500 },
   @{ name = "test_bavaria_daynight"; args = "--headless -- --mission=bavaria --autoplay=test_bavaria_daynight"; timeout = 1200 },
+  @{ name = "test_bavaria_weather"; args = "--headless -- --mission=bavaria --autoplay=test_bavaria_weather"; timeout = 1200 },
   @{ name = "test_bavaria_landmark"; args = "--headless -- --mission=bavaria --autoplay=test_bavaria_landmark"; timeout = 1200 },
   @{ name = "test_bavaria_factory"; args = "--headless -- --mission=bavaria --autoplay=test_bavaria_factory"; timeout = 1200 },
   @{ name = "test_bavaria_panorama_ring"; args = "--headless -- --mission=bavaria --autoplay=test_bavaria_panorama_ring"; timeout = 1200 },
   @{ name = "test_bavaria_tunnels"; args = "--headless -- --mission=bavaria --autoplay=test_bavaria_tunnels"; timeout = 1500 },
+  @{ name = "test_interact_sight"; args = "--headless -- --mission=bavaria --autoplay=test_interact_sight"; timeout = 1200 },
+  @{ name = "test_bavaria_doors"; args = "--headless -- --mission=bavaria --autoplay=test_bavaria_doors --door_png=res://test_output/bavaria_doors_nachher.png"; timeout = 1200 },
   @{ name = "test_bavaria_integration"; args = "--headless -- --autoplay=test_bavaria_integration"; mp = $true; timeout = 1800 },
   @{ name = "test_bavaria_mp"; args = "--headless -- --autoplay=test_bavaria_mp"; mp = $true; group = "full"; timeout = 1800 },
+  # 0.12.2: Testkarte Castle (Gerüst, eigene Texturen, ohne orig_cache lauffähig)
+  @{ name = "test_castle_map"; args = "--headless -- --mission=castle --autoplay=test_castle_map"; timeout = 900 },
+  @{ name = "test_castle_mp"; args = "--headless -- --autoplay=test_castle_mp"; mp = $true; timeout = 900 },
+  @{ name = "test_castle_mp_occupation"; args = "--headless -- --autoplay=test_castle_mp --occupation=1"; mp = $true; timeout = 900 },
+  @{ name = "test_castle_mp_tdm"; args = "--headless -- --autoplay=test_castle_mp --tdm=1"; mp = $true; timeout = 900 },
   # --- Gruppe "full" (nur mit -Full): lange Läufe ---
   @{ name = "test_stairs";   args = "--headless -- --autoplay=test_stairs --maps=all"; group = "full"; timeout = 3600 },
   @{ name = "test_mp_nav";   args = "--headless -- --autoplay=test_mp_nav --maps=mp"; group = "full"; timeout = 3600 },

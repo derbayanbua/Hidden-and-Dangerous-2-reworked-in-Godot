@@ -60,10 +60,45 @@ static func closest(n: Node3D, p: Vector3) -> Vector3:
 	return c
 
 
+## 0.12.2: Pfadabfragen der Bots kurz zwischengespeichert. Wiederholte Abfragen von derselben Stelle zum selben Ziel
+## (Routenplanung: Kartenwegpunkte, Versatzprüfung je Zwischenpunkt, Notversatz-Prüfung, Zielwahl) liefen sonst je Bild
+## mehrfach durch die A*-Suche; scheitert die Suche (Start auf abgetrennter Mini-Insel → Godot-Fehler „most reachable
+## polygons“), wiederholte jeder Bot sie im Takt. Ergebnis je Netzstand/Start/Ziel (0,25-m-Raster) 1 s, leere/abgebrochene
+## Ergebnisse 2 s gültig; höchstens PATH_CACHE_MAX Einträge. Keine Abfrage mit unendlichen/NaN-Punkten.
+## 0.12.2: bot path queries cached briefly (1 s, failed ones 2 s) so a failing search is not repeated every frame.
+const PATH_CACHE_MAX := 512
+const PATH_TTL_MS := 1000
+const PATH_FAIL_TTL_MS := 2000
+static var _path_cache := {}     ## Schlüssel → [gültig bis ms, PackedVector3Array]
+static var _path_cache_mission := 0
+static var path_queries := 0    ## Statistik: echte A*-Abfragen
+static var path_hits := 0        ## Statistik: aus dem Zwischenspeicher
+
+
 static func path(n: Node3D, a: Vector3, b: Vector3) -> PackedVector3Array:
-	if not nav_ready(n):
+	if not nav_ready(n) or not a.is_finite() or not b.is_finite():
 		return PackedVector3Array()
-	return AIBrain.nav_path(map_of(n), a, b)   # B-010c: Suchgrenze angehoben
+	var m := map_of(n)
+	# Karten-RID/Netzstand können nach einem Kartenwechsel wieder dieselben Zahlen haben → Speicher je Missionsinstanz
+	var mi = Game.current_mission()
+	var mid: int = mi.get_instance_id() if mi != null else 0
+	if mid != _path_cache_mission:
+		_path_cache.clear()
+		_path_cache_mission = mid
+	var key := "%d:%d:%s:%s" % [m.get_id(), NavigationServer3D.map_get_iteration_id(m),
+		str(a.snapped(Vector3.ONE * 0.25)), str(b.snapped(Vector3.ONE * 0.25))]
+	var t := Time.get_ticks_msec()
+	var e = _path_cache.get(key)
+	if e != null and int(e[0]) > t:
+		path_hits += 1
+		return e[1]
+	if _path_cache.size() >= PATH_CACHE_MAX:
+		_path_cache.clear()
+	path_queries += 1
+	var pts := AIBrain.nav_path(m, a, b)   # B-010c: Suchgrenze angehoben
+	var ok := pts.size() >= 2 and ends_near(pts, b, 3.0, 3.0)
+	_path_cache[key] = [t + (PATH_TTL_MS if ok else PATH_FAIL_TTL_MS), pts]
+	return pts
 
 
 static func length(pts: PackedVector3Array) -> float:
@@ -116,8 +151,23 @@ static func cover_score(space: PhysicsDirectSpaceState3D, p: Vector3, threat: Ve
 
 ## Route zum Ziel planen. use_cover: Zwischenpunkte an Deckungen nahe dem Weg (nur wenn der Umweg gering ist).
 ## Rückgabe: Ziel erreichbar (sonst führt die Route zum nächsten erreichbaren Punkt).
+var _plan_ms := -1000000          ## Zeitpunkt der letzten Planung (ms)
+var replans_skipped := 0          ## Statistik: gedrosselte Neuplanungen nach Festhängen
+
+## 0.12.2: Neuplanung nach Festhängen/Pendeln höchstens alle REPLAN_MIN_S (sonst je Abhilfestufe eine volle Planung
+## mit Kartenwegpunkten = bis zu ~10 Pfadabfragen, bei unerreichbarem Ziel endlos wiederholt).
+const REPLAN_MIN_S := 3.0
+
+func replan_due() -> bool:
+	if Time.get_ticks_msec() - _plan_ms >= int(REPLAN_MIN_S * 1000.0):
+		return true
+	replans_skipped += 1
+	return false
+
+
 func plan(s: Soldier, to: Vector3, threat: Vector3, use_cover: bool) -> bool:
 	plans += 1
+	_plan_ms = Time.get_ticks_msec()
 	planned_on_nav = nav_ready(s)
 	waypoints = PackedVector3Array()
 	wp_i = 0

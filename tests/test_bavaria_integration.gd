@@ -81,10 +81,17 @@ func _run() -> void:
 # --- 1. Register, LAN-/Internet-Menü, Rotation ----------------------------------------------------------
 
 func _registry_and_menus() -> void:
+	# Hinter Bavaria dürfen nur weitere Testkarten (z. B. Castle) und eigene Karten (.pck, „custom_map“) stehen.
+	var first := Game.MP_MAPS.find(IDS[0])
+	var tail_ok := first >= 0
+	for k in range(first + IDS.size(), Game.MP_MAPS.size()):
+		var mm: Dictionary = Game.MISSIONS.get(Game.MP_MAPS[k], {})
+		if not (bool(mm.get("test_map", false)) or mm.has("custom_map")):
+			tail_ok = false
 	for i in IDS.size():
 		var id: String = IDS[i]
-		var pos := Game.MP_MAPS.size() - IDS.size() + i
-		check(Game.MP_MAPS.find(id) == pos and Game.MISSIONS.has(id), "Register: Testkarte %s am Listenende (Position %d)" % [id, pos])
+		var pos := first + i
+		check(tail_ok and Game.MP_MAPS.find(id) == pos and Game.MISSIONS.has(id), "Register: Testkarte %s im Testkartenblock am Listenende (Position %d)" % [id, pos])
 		check(bool(Game.MISSIONS[id].get("test_map", false)) and String(Game.MISSIONS[id].get("title", "")).begins_with("Bavaria (Test"),
 			"Register: als Testkarte gekennzeichnet (%s)" % String(Game.MISSIONS[id].get("title", "")))
 		check(int(Game.MISSIONS[id].get("mp_mode", -1)) == int(MODES[i]), "Register: fester Spielstil %s" % Net.MODE_NAMES[MODES[i]])

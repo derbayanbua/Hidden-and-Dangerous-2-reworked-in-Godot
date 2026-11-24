@@ -7,6 +7,7 @@ uniform sampler2D light_soil_tex : source_color,filter_linear_mipmap_anisotropic
 uniform sampler2D gravel_tex : source_color,filter_linear_mipmap_anisotropic,repeat_enable;
 uniform sampler2D stone_grass_tex : source_color,filter_linear_mipmap_anisotropic,repeat_enable;
 uniform int surface_kind = 0;
+uniform float wetness = 0.0;   // Wetter: 0 trocken, 1 nass
 uniform float route_half_width = 0.0;
 uniform vec2 route_a;
 uniform vec2 route_b;
@@ -39,5 +40,8 @@ void fragment(){
   float edge=smoothstep(route_half_width-0.42,route_half_width,dist+noise(p*3.2)*0.12);
   base=mix(base,tile(grass_tex,uv),edge);
  }
- ALBEDO=base;ROUGHNESS=0.92;SPECULAR=0.18;
+ // Nässe (Wetter, weather.gd): dunkler, glatter; auf Wegen/Erde Pfützen in Mulden des Rauschens
+ float puddle=(surface_kind>=2)?smoothstep(0.62,0.70,noise(p*0.35)+noise(p*1.1)*0.25)*smoothstep(0.35,1.0,wetness):0.0;
+ base*=mix(1.0,0.72,wetness)*mix(1.0,0.8,puddle);
+ ALBEDO=base;ROUGHNESS=mix(mix(0.92,0.55,wetness),0.06,puddle);SPECULAR=mix(0.18,0.5,max(wetness*0.6,puddle));
 }

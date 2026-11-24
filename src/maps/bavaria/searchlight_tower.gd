@@ -227,6 +227,9 @@ func _build_head(h: Head) -> void:
 	light.spot_angle_attenuation = 0.6
 	light.spot_attenuation = 0.35
 	light.shadow_enabled = true
+	# Geringe Normal-Bias: bei 95 m Reichweite ließ die Standard-Bias (1,0) Licht durch dünne Hauswände
+	light.shadow_bias = 0.02
+	light.shadow_normal_bias = 0.35
 	light.light_volumetric_fog_energy = 3.0
 	light.position.z = -0.36
 	light.visible = false
@@ -411,12 +414,26 @@ func _acquire(h: Head) -> bool:
 			return true
 	return false
 
+## Sichtbarer Kegel endet am ersten Hindernis: Mittelstrahl + 4 Randstrahlen (90 % des Öffnungswinkels), kürzester
+## Treffer gilt – sonst lief der Kegel neben dem Mittelstrahl durch Hauswände hindurch.
 func _update_cone(h: Head) -> void:
+	h.cone_pivot.scale = Vector3.ONE * maxf(cone_length(h), 1.0)
+
+func cone_length(h: Head) -> float:
 	var origin := h.light.global_position
-	var q := PhysicsRayQueryParameters3D.create(origin, origin + h.dir() * REACH, 1, exclude)
-	var hit := get_world_3d().direct_space_state.intersect_ray(q)
-	var len := REACH if hit.is_empty() else origin.distance_to(hit.position)
-	h.cone_pivot.scale = Vector3.ONE * maxf(len, 1.0)
+	var d := h.dir()
+	var side := d.cross(Vector3.UP)
+	side = side.normalized() if side.length() > 0.01 else Vector3.RIGHT
+	var up := side.cross(d).normalized()
+	var a := deg_to_rad(CONE_DEG) * 0.9
+	var len := REACH
+	var space := get_world_3d().direct_space_state
+	for dv in [d, d.rotated(up, a), d.rotated(up, -a), d.rotated(side, a), d.rotated(side, -a)]:
+		var q := PhysicsRayQueryParameters3D.create(origin, origin + (dv as Vector3) * REACH, 1, exclude)
+		var hit := space.intersect_ray(q)
+		if not hit.is_empty():
+			len = minf(len, origin.distance_to(hit.position))
+	return len
 
 ## Für Tests: gerade verfolgtes Ziel je Kopf
 func tracked() -> Array:

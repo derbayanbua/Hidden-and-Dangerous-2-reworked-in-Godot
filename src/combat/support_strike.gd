@@ -38,7 +38,8 @@ const PLANE_MODELS := ["africa5/models/la_ju88.glb", "africa2/models/la_bf109let
 var mission: Node
 var map_open := false
 var center := Vector3.ZERO
-var spawn_candidates: Array = []       ## Original-Funkgerätstellen (sonst Kartenmitte)
+var spawn_candidates: Array = []       ## Original-Funkgerätstellen bzw. Missions-Hook (sonst Kartenmitte)
+var map_spots := false                 ## Stellen aus mission.support_radio_spots() (Ansage ohne „Kartenmitte“)
 ## Zustand (alle Rechner, vom Server gesetzt): 0 kein Funkgerät, 1 liegt, 2 getragen
 var radio_state := 0
 var radio_kind := KIND_ART
@@ -81,6 +82,10 @@ func setup(m: Node) -> void:
 	center = _map_center()
 	_detect_t = 1.0                     # Physikraum braucht einen Schritt, bevor Strahlabfragen treffen
 	spawn_candidates = _orig_radio_spots()
+	# Eigene Karten ohne Original-Funkstellen: optionaler Missions-Hook mit festen Abwurfstellen
+	if spawn_candidates.is_empty() and m and m.has_method("support_radio_spots"):
+		spawn_candidates = (m.support_radio_spots() as Array).duplicate()
+		map_spots = not spawn_candidates.is_empty()
 	if Net.is_online:
 		_hide_orig_radios()
 	if not Net.dedicated:
@@ -325,7 +330,10 @@ func server_spawn() -> bool:
 		spawn_t = 10.0
 		return false
 	_set_radio(1, kind, g + Vector3.UP * 0.05, 0)
-	Net._announce("Funkgerät (%s) in der Kartenmitte abgeworfen." % NAME[kind])
+	if map_spots:
+		Net._announce("Funkgerät (%s) abgeworfen." % NAME[kind])
+	else:
+		Net._announce("Funkgerät (%s) in der Kartenmitte abgeworfen." % NAME[kind])
 	_log("spawn")
 	return true
 

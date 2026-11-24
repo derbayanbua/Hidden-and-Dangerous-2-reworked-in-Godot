@@ -119,6 +119,8 @@ func _register_orig_missions() -> void:
 ## Mehrspieler-Karten: Original-MP-Karten (orig_cache/mp_maps.json, tools/fmt_mp.py) und – als Arena –
 ## alle Kampagnenkarten (Level, Türen, Fahrzeuge der Originalmission; keine KI, keine Skripte).
 var MP_MAPS: Array = []
+## Eigene Karten als .pck (src/mission/custom_maps.gd)
+const CUSTOM_MAPS := preload("res://src/mission/custom_maps.gd")
 
 
 func _register_mp_maps(texts) -> void:
@@ -154,6 +156,8 @@ func _register_mp_maps(texts) -> void:
 	for id in MISSIONS:
 		if bool(MISSIONS[id].get("test_map", false)) and not MP_MAPS.has(String(id)):
 			MP_MAPS.append(String(id))
+	# Eigene Karten aus maps/ bzw. user://maps/ (.pck) ganz ans Ende, gekennzeichnet
+	CUSTOM_MAPS.register(self)
 
 
 ## Testkarte Bavaria (eigener Entwurf). Bilder sind optional; ohne sie neutrale Ersatzmaterialien.
@@ -185,6 +189,22 @@ func _register_test_maps() -> void:
 		MISSIONS[id] = e
 	if not PRACTICE_MISSIONS.has("bavaria"):
 		PRACTICE_MISSIONS.append("bavaria")
+	# 0.12.2 Testkarte Castle (eigener Entwurf, Gerüst; nur eigene Texturen, läuft ohne orig_cache).
+	# Kein Übungseinsatz; Direktstart --mission=castle zum Besichtigen.
+	var castle_base := {"script": "res://src/missions/castle.gd", "test_map": true,
+		"mp_allowed_from": "normandy2_mp_zone", "mp_extra_allowed": TEST_MAP_LAUNCHERS}
+	var castle_entries := {
+		"castle": {"title": "Castle (Test)", "mp_mode": 0,
+			"briefing": "Testkarte Castle.\nBurganlage auf einem Höhenrücken: Hauptburg und fünf Vorhöfe hintereinander, verbunden durch Tortürme und Grabenbrücken. Gekämpft wird in der Hauptburg und den beiden angrenzenden Vorhöfen (F, E, D) – Mauern, Wehrgänge und Türme bieten erhöhte Stellungen. Das Tor zum dritten Vorhof ist verrammelt, die Ringmauer bildet die Kartengrenze."},
+		"castle_occupation": {"title": "Castle (Test, Eroberung)", "mp_mode": 2, "script": "res://src/missions/castle_occupation.gd",
+			"briefing": "Testkarte Castle.\nBurganlage auf einem Höhenrücken: Hauptburg und fünf Vorhöfe. In jedem Hof liegt eine Zone (A–F, von Norden nach Süden). Frontlinie: Einnehmen lässt sich nur eine Zone neben einer eigenen. Die Alliierten halten den nördlichsten Vorhof A, die Achse die Hauptburg F, dazwischen ist alles neutral. Wiedereinstieg an der eigenen Zone nächst der Front."},
+		"castle_tdm": {"title": "Castle (Test, Team-DM)", "mp_mode": 1,
+			"briefing": "Testkarte Castle.\nBurganlage auf einem Höhenrücken. Team-Deathmatch in der Hauptburg und den beiden angrenzenden Vorhöfen: Die Alliierten beginnen im zweiten Vorhof (D), die Achse in der Hauptburg (F); dazwischen liegt der Torhof (E). Das Tor zum dritten Vorhof ist verrammelt."},
+	}
+	for id in castle_entries:
+		var ce: Dictionary = castle_base.duplicate(true)
+		ce.merge(castle_entries[id], true)
+		MISSIONS[id] = ce
 	# 0.11.7 Schießstand (eigener Entwurf [D]): Prüfkarte für Waffenabgleich, Übungseinsatz, nicht in der MP-Liste
 	MISSIONS["test_range"] = {"title": "Schießstand (Test)", "script": "res://src/missions/test_range.gd",
 		"briefing": "Schießstand mit Bahnen auf 3, 7, 10, 25, 50, 100, 200 und 300 m. Auf jeder Bahn steht ein unverwundbarer Dummy (echte Soldatenfigur mit allen Trefferzonen); Treffer werden nur protokolliert. Keine Missionsziele."}
@@ -1305,6 +1325,7 @@ func _ready() -> void:
 	_check_pck_version()
 	_register_test_maps()
 	_load_local_content()
+	CUSTOM_MAPS.scan()            # eigene Karten (.pck) vor der Registrierung laden
 	_register_orig_missions()
 	_load_current_profile()
 	if cli.has("screenshot"):

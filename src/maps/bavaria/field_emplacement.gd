@@ -14,6 +14,7 @@ class FieldFlak extends OrigInteractive.OrigEmplacement:
 	var base_yaw := 0.0
 	var last_operator := 0
 	var pending_operator := 0
+	var pitch_min := -0.17     ## tiefster Blick (rad); Burgtürme: MG 42 bis −40°
 
 	@rpc("authority","call_remote","reliable")
 	func sync_operator(id: int) -> void:
@@ -90,7 +91,7 @@ class FieldFlak extends OrigInteractive.OrigEmplacement:
 				sync_operator(pending_operator)
 		if is_instance_valid(gunner) and gunner.alive:
 			# Originalmodell bietet getrennte Horizontal-/Vertikalachsen.
-			gunner.look_pitch = clampf(gunner.look_pitch,-0.17,1.40)
+			gunner.look_pitch = clampf(gunner.look_pitch,pitch_min,1.40)
 			if traverse:
 				traverse.rotation.y = traverse_rest.y + wrapf(gunner.look_yaw-base_yaw,-PI,PI)
 			if elevation:

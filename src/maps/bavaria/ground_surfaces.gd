@@ -9,9 +9,12 @@ var available := false
 const GROUND_DIR := "res://assets/maps/bavaria/ground/"
 const TEXTURES := [["grass_tex","boden_gras.png"],["flower_tex","boden-mit-mehrblumen.png"],["soil_tex","boden-mit-erde.png"],["light_soil_tex","boden_leicht_erdig.png"],["gravel_tex","boden_stein.png"],["stone_grass_tex","boden_stein_gras.png"]]
 var _lb: LevelBuilder
+const LibraryTextures := preload("res://src/maps/bavaria/library_textures.gd")
 
 func _init(lb: LevelBuilder) -> void:
 	_lb = lb
+	# Projekteigene Wand-/Dach-/Holz-/Steintexturen statt Originaltexturen (--lib_tex=0 = aus).
+	LibraryTextures.apply(lb)
 	for pair in TEXTURES:
 		if not ResourceLoader.exists(GROUND_DIR + pair[1]):
 			continue
@@ -41,6 +44,8 @@ func _init(lb: LevelBuilder) -> void:
 		var mat := lb.mat(entry[0]).duplicate() as StandardMaterial3D
 		mat.albedo_texture = sources[entry[1]]
 		mat.albedo_color = Color.WHITE
+		mat.normal_enabled = false          # Normal/Rauheit der Bibliothekstextur passen nicht zum Foto
+		mat.roughness_texture = null
 		mat.uv1_scale = Vector3.ONE/2.4
 		mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 		mat.roughness = 0.95

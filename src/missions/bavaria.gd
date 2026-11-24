@@ -18,6 +18,7 @@ const SceneMatch := preload("res://src/maps/bavaria/scene_match.gd")
 const StreetLamps := preload("res://src/maps/bavaria/street_lamps.gd")
 const DayNight := preload("res://src/maps/bavaria/day_night.gd")
 const Tunnels := preload("res://src/maps/bavaria/tunnels.gd")
+const Weather := preload("res://src/maps/bavaria/weather.gd")
 const SearchlightTower := preload("res://src/maps/bavaria/searchlight_tower.gd")
 const BunkerExtras := preload("res://src/maps/bavaria/bunker_extras.gd")
 const Landmark := preload("res://src/maps/bavaria/landmark.gd")
@@ -47,6 +48,7 @@ var interior_decoration: RefCounted
 var frontline := false
 var prank_mines: Node3D
 var room_lighting: Node3D
+var weather: Node                     ## dynamisches Wetter (src/maps/bavaria/weather.gd), --weather=0 aus
 var street_lamps: RefCounted          ## Wegbeleuchtung (street_lamps.gd)
 var tunnels: RefCounted               ## Stollensystem (tunnels.gd)
 var searchlight_tower: Node3D         ## Suchturm auf der Wiese (searchlight_tower.gd, Knoten „Suchturm“)
@@ -104,7 +106,7 @@ func _build_world() -> void:
 	holes.append_array(FieldTrenches.hole_polygons())
 	holes.append_array(tunnel_holes)
 	_ground(boundary, "grass", 0.0, true, "PlayableGround", {}, holes)
-	_ground(polygon(layout["meadow"]), "meadow", 0.012, false, "Wiese", {}, FieldTrenches.hole_polygons())
+	_ground(polygon(layout["meadow"]), "meadow", 0.012, false, "Wiese", {}, FieldTrenches.hole_polygons() + tunnel_holes)
 	_build_roads()
 	_build_houses()
 	woodland_emplacement = WoodlandEmplacement.new()
@@ -138,7 +140,11 @@ func _build_world() -> void:
 	if extras:
 		# Stollengrube erst hier als Grundriss: Bäume darin entfernen, ohne die Zufallsverteilung davor zu verschieben
 		building_footprints.append_array(Tunnels.footprints(self))
+	var lanes: Array = Tunnels.fire_lanes() if extras else []
+	building_footprints.append_array(lanes)        # Schussfeld des MG-Nests nur für das Ausdünnen der Bäume
 	_cull_trees_at_buildings()
+	for lane in lanes:
+		building_footprints.erase(lane)
 	_thin_vista_trees()
 	_batch_tree_visuals()
 	_build_details()
@@ -159,8 +165,12 @@ func _build_world() -> void:
 	day_night.name = "Tageszeit"     # feste Knotenlage: RPC-Abgleich der Zeit zwischen Server und Clients
 	day_night.mission = self
 	add_child(day_night)
+	weather = Weather.new()           # nach der Tageszeit im Baum: liest deren Licht, liefert ihr Faktoren
+	weather.mission = self
+	add_child(weather)                # Knotenname „Wetter“ (RPC-Abgleich)
 	if env:
 		day_night.bind(env, sun)
+		weather.bind(env)
 	if String(Game.cli.get("blickfang", "1")) != "0":   # Fern-Blickfang (Dorf auf der Anhöhe); --blickfang=0 für Vergleichsläufe
 		landmark = Landmark.new()
 		landmark.build(self)
@@ -409,10 +419,26 @@ func woodland_clearance(p: Vector3,margin: float) -> bool:
 	var house: Node3D = static_root.get_node("woodland_shed")
 	var q := house.to_local(p)
 	var size: Vector2 = house.get_meta("footprint_size")
+	if String(Game.cli.get("stollen", "1")) != "0":
+		for lane in Tunnels.fire_lanes():   # Schussfeld des MG-Nests: Hecke dort ausgespart
+			if Tunnels._dist_poly(Vector2(p.x, p.z), lane) < margin * 0.5:
+				return false
 	return absf(q.x)>size.x*0.5+margin or absf(q.z)>size.y*0.5+margin
 
-func _tree(p: Vector3, scale_value: float, species: String) -> bool:
-	var n: Node3D = _templates.prop(species, p, _rng.randf_range(-PI, PI), scale_value)
+func _tree(p: Vector3, scale_value: float, species: String, context := "wood") -> bool:
+	# EZ-Tree (Standard, `--eztree=0` = Originalbäume): Art nach Ort, Modellmaßstab auf gleiche Endhöhenklasse.
+	# In der Blickschneise zum Kirchturm nur schlanke Arten (Fichte/Birke) – breite Laubkronen schlössen die Schneise.
+	if scene_details != null and context == "wood":
+		var q := Vector2(p.x, p.z)
+		if not scene_details.vista_ready:
+			scene_details._setup_vista()      # idempotent; Schneise schon beim Pflanzen bekannt
+		if scene_details.vista_factor(q) > 0.0 or scene_details.vista_lane(q) > 0.0:
+			context = "vista"
+	var key: String = _templates.tree_key(species, context, p, scale_value)
+	var model_scale := scale_value
+	if key != species:
+		model_scale = preload("res://src/maps/bavaria/eztree.gd").model_scale(key, scale_value)
+	var n: Node3D = _templates.prop(key, p, _rng.randf_range(-PI, PI), model_scale)
 	if n == null:
 		lb.tree(p.x, p.z, scale_value)
 		return true
@@ -580,7 +606,7 @@ func _build_woodland() -> void:
 	for i in 1000:
 		var p := pixel([_rng.randf_range(260, 1010), _rng.randf_range(710, 1190)])
 		if _free(p, 2.2):
-			if _tree(p, _rng.randf_range(0.55, 0.95), species[planted % 3]):
+			if _tree(p, _rng.randf_range(0.55, 0.95), species[planted % 3], "garden"):
 				planted += 1
 		if planted >= 210:
 			break
@@ -623,15 +649,28 @@ func _build_details() -> void:
 		if gardens >= 12:
 			break
 
+## Entfernungs-LOD der Kartenbäume (EZ-Tree): Zellgröße [m], Grenze nah (volle Stufe) ↔ LOD1 [m], Überblendung [m].
+const TREE_LOD_CELL := 10.0
+const TREE_LOD_NEAR := 55.0
+const TREE_LOD_MARGIN := 10.0
+
 func _batch_tree_visuals() -> void:
 	# Wiederholte Originalmeshes instanzieren statt tausende einzelne Baumteile zu zeichnen.
 	# Die originalen Meshes, UVs und Materialien bleiben unverändert; Stammkollisionen bleiben separat.
 	var batches := {}
 	var sources: Array[MeshInstance3D] = []
 	for tree in get_tree().get_nodes_in_group("bavaria_trees"):
-		for child in tree.find_children("*", "MeshInstance3D", true, false):
+		var kids := tree.find_children("*", "MeshInstance3D", true, false)
+		var has_full := false
+		for child in kids:
+			has_full = has_full or ((child as MeshInstance3D).mesh != null and (child as MeshInstance3D).mesh.has_meta("ez_lod1"))
+		for child in kids:
 			var mi := child as MeshInstance3D
 			if mi.mesh == null:
+				continue
+			if has_full and String(mi.mesh.resource_name).contains("_lod"):
+				# Übrig gebliebene EZ-Tree-LOD-Kopien neben der vollen Stufe: nicht zusätzlich (immer sichtbar) zeichnen
+				sources.append(mi)
 				continue
 			var key := str(mi.mesh.get_instance_id()) + ":" + str(mi.material_override.get_instance_id() if mi.material_override else 0)
 			if not batches.has(key):
@@ -639,19 +678,60 @@ func _batch_tree_visuals() -> void:
 			batches[key].transforms.append(static_root.global_transform.affine_inverse() * mi.global_transform)
 			sources.append(mi)
 	for batch in batches.values():
-		var multi := MultiMesh.new()
-		multi.transform_format = MultiMesh.TRANSFORM_3D
-		multi.mesh = batch.mesh
-		multi.instance_count = batch.transforms.size()
-		for i in multi.instance_count:
-			multi.set_instance_transform(i, batch.transforms[i])
-		var instance := MultiMeshInstance3D.new()
-		instance.name = "TreeBatch"
-		instance.multimesh = multi
-		instance.material_override = batch.material
-		static_root.add_child(instance)
-		instance.add_to_group("bavaria_tree_batches")
-		SceneDetails.keep_xforms(instance, batch.transforms)
+		# Entfernungs-LOD nur für das Laub; Rinde immer volle Stufe (wenige Dreiecke, kein Wechsel am Stamm)
+		var ez: bool = batch.mesh.has_meta("ez_lod1") and not String(batch.mesh.resource_name).ends_with("_tree")
+		# EZ-Tree (11/2026): Kartenbäume in Zellen (TREE_LOD_CELL) mit Entfernungs-LOD: nah volle Stufe (alle Laubkarten,
+		# runde Äste), fern LOD1, weich überblendet (Sichtweite je Zelle). Vorher überall LOD1 → lichte, kartige Kronen.
+		var groups := {}
+		for xf in batch.transforms:
+			var o: Vector3 = (xf as Transform3D).origin
+			var cell := Vector2i(floori(o.x / TREE_LOD_CELL), floori(o.z / TREE_LOD_CELL)) if ez else Vector2i.ZERO
+			if not groups.has(cell):
+				groups[cell] = []
+			groups[cell].append(xf)
+		for cell_xforms in groups.values():
+			var bark_ez: bool = batch.mesh.has_meta("ez_lod1") and not ez
+			for level in ([0, 1] if ez else ([0] if bark_ez else [1])):
+				var multi := MultiMesh.new()
+				multi.transform_format = MultiMesh.TRANSFORM_3D
+				multi.mesh = preload("res://src/maps/bavaria/eztree.gd").lod_mesh(batch.mesh, level) if level > 0 else batch.mesh
+				multi.instance_count = cell_xforms.size()
+				for i in multi.instance_count:
+					multi.set_instance_transform(i, cell_xforms[i])
+				var instance := MultiMeshInstance3D.new()
+				instance.name = "TreeBatch" if level > 0 else "TreeBatchNear"
+				instance.multimesh = multi
+				instance.material_override = batch.material
+				if ez:
+					# harter Wechsel mit Hysterese (Selbst-Überblendung zeichnete Stämme in der Nähe halbdurchsichtig)
+					instance.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED
+					if level == 0:
+						instance.visibility_range_end = TREE_LOD_NEAR
+						instance.visibility_range_end_margin = TREE_LOD_MARGIN
+					else:
+						instance.visibility_range_begin = TREE_LOD_NEAR
+						instance.visibility_range_begin_margin = TREE_LOD_MARGIN
+				static_root.add_child(instance)
+				instance.add_to_group("bavaria_tree_batches")
+				SceneDetails.keep_xforms(instance, cell_xforms)
+				if ez or bark_ez:
+					instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF   # Schatten über TreeShadowBatch (LOD3)
+		if batch.mesh.has_meta("ez_lod3") and String(batch.mesh.resource_name).ends_with("_tree"):
+			pass      # Rinde: Schatten nur über die Laubgruppe
+		elif batch.mesh.has_meta("ez_lod3"):
+			# Schatten der EZ-Tree-Kartenbäume aus der gröbsten Stufe (Schattenkaskaden zeichnen sonst LOD1 mehrfach).
+			var shadow_mm := MultiMesh.new()
+			shadow_mm.transform_format = MultiMesh.TRANSFORM_3D
+			shadow_mm.mesh = batch.mesh.get_meta("ez_lod3")
+			shadow_mm.instance_count = batch.transforms.size()
+			for i in shadow_mm.instance_count:
+				shadow_mm.set_instance_transform(i, batch.transforms[i])
+			var shadow := MultiMeshInstance3D.new()
+			shadow.name = "TreeShadowBatch"
+			shadow.multimesh = shadow_mm
+			shadow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
+			static_root.add_child(shadow)
+			shadow.add_to_group("bavaria_tree_shadow_batches")
 	# Kinder vor Eltern entfernen; einige glTF-Modelle besitzen Mesh-Knoten als Wurzel.
 	for i in range(sources.size() - 1, -1, -1):
 		if is_instance_valid(sources[i]):
@@ -862,6 +942,25 @@ func mp_map_image() -> Dictionary:
 	if not ResourceLoader.exists(MAP_IMAGE):
 		return {}
 	return {"texture": load(MAP_IMAGE), "rect": mp_map_rect()}
+
+## Funk-Unterstützung (support_strike.gd): Funkgerät liegt im Sandsacknest beim Suchturm auf der Wiese
+## (nächstes „sandbag_nest“ der Felddeckungen, Mitte des Rings); ohne Nest neben dem Turm.
+func support_radio_spots() -> Array:
+	if not has_meta("watchtower_site"):
+		return []
+	var site: Vector3 = get_meta("watchtower_site")
+	var best: Node3D = null
+	var best_d := 45.0
+	for c in get_tree().get_nodes_in_group("bavaria_field_cover"):
+		if String(c.get_meta("cover_kind", "")) != "sandbag_nest":
+			continue
+		var d: float = (c as Node3D).global_position.distance_to(site)
+		if d < best_d:
+			best_d = d
+			best = c
+	if best:
+		return [best.global_position]
+	return [site + Vector3(3.5, 0.0, 0.0)]
 
 func mp_spawns() -> Array:
 	var out: Array = []

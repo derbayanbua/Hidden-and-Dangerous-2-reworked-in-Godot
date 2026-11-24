@@ -274,9 +274,10 @@ func _cycle(m: Mission) -> void:
 	dn.set_hour(0.5, 0.0)
 	await get_tree().process_frame
 	st = dn.state()
-	check(dn.phase() == "nacht" and st.moon and m.sun.light_energy < 0.1, "Nacht: Mondlicht schwach")
+	# Nachtlicht bewusst angehoben (day_night.gd: Mond 0,08 → 0,14, Umgebung 0,16 → 0,33; vorher „Nacht zu dunkel“)
+	check(dn.phase() == "nacht" and st.moon and m.sun.light_energy < 0.2, "Nacht: Mondlicht schwach (%.3f)" % m.sun.light_energy)
 	check(rl.lights_on() == rl.coverage.size() and sl.lights_on() == sl.lights.size(), "Nachts alle Lichter an")
-	check(m.env.ambient_light_energy < day_amb * 0.5, "Nachts deutlich weniger Umgebungslicht")
+	check(m.env.ambient_light_energy < day_amb * 0.65, "Nachts deutlich weniger Umgebungslicht (%.2f / Tag %.2f)" % [m.env.ambient_light_energy, day_amb])
 	check(m.light_factor < 0.6, "Wahrnehmung nachts eingeschränkt (light_factor %.2f)" % m.light_factor)
 	var sky := m.env.sky.sky_material if m.env.sky else null
 	if sky is ShaderMaterial:

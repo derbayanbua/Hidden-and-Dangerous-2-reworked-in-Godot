@@ -1,0 +1,12 @@
+{
+	"id": "__MAP_ID__",
+	"name": {"de": "Vorlage Übungsfeld", "en": "Template training ground"},
+	"briefing": {
+		"de": "Eigene Beispielkarte: kleine Fläche mit Deckung und vier Startpunkten.",
+		"en": "Example custom map: small area with cover and four spawn points."
+	},
+	"scene": "res://custom_maps/__MAP_ID__/main.tscn",
+	"script": "res://custom_maps/__MAP_ID__/mission.gd",
+	"modes": ["singleplayer", "deathmatch", "teamdeathmatch"],
+	"version": "1.0"
+}

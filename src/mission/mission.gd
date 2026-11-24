@@ -876,6 +876,12 @@ func _try_bridge(space: PhysicsDirectSpaceState3D, params: PhysicsShapeQueryPara
 		if dbg:
 			print("   Weg versperrt ", cm)
 		return 0
+	if not climb and _bridge_strict():
+		var why := _bridge_width(space, a, b)
+		if why != "":
+			if dbg or Game.cli.has("bridge_strict_log"):
+				print("   BRIDGE-STRICT %s -> %s (dy %.2f): %s" % [a, b, b.y - a.y, why])
+			return 0
 	if not climb:
 		# Boden in der Mitte (keine Brücke über Abgründe)
 		var mid := (a + b) * 0.5
@@ -899,6 +905,42 @@ func _try_bridge(space: PhysicsDirectSpaceState3D, params: PhysicsShapeQueryPara
 	dynamic_root.add_child(link)
 	bridge_links.append(link)
 	return 2 if climb else 1
+
+## Zusatzprüfung für ebene Inselbrücken (0.12.2, vorher nur auf der Burgkarte nachträglich): die Kapselprüfung per
+## cast_motion (r 0,25) übersieht Körper, in denen die Kapsel schon startet, und Spalte zwischen Kapsel-Ø und Soldat
+## (Kapsel r 0,3) – Brücken führten durch 0,4–0,6 m schmale Spalten zwischen Gebäuden, Bots blieben hängen. Lichte
+## Breite quer zum Link an 15–85 % in 0,6/1,1/1,5 m über dem höheren Ende (Ebenen 1 und 5) ≥ BRIDGE_MIN_WIDTH.
+## Kletterstellen unverändert. Eine zusätzliche Wandprüfung per Längsstrahl wurde verworfen: sie trennte auf der Burg
+## ~250 nötige Verbindungen am Mauerfuß (Treffer an Fundamentkanten) und machte Wehrgangtreppen unerreichbar.
+## Rückgabe: "" = frei, sonst Grund. `--nav_bridge_strict=0` = Stand davor (Vergleich), `--bridge_strict_log=1`
+## listet verworfene Brücken. Werte [E].
+const BRIDGE_MIN_WIDTH := 0.7
+
+
+static func _bridge_strict() -> bool:
+	return str(Game.cli.get("nav_bridge_strict", "1")) != "0"
+
+
+func _bridge_width(space: PhysicsDirectSpaceState3D, a: Vector3, b: Vector3) -> String:
+	var mask := 1 | LevelBuilder.FENCE_LAYER
+	var top := maxf(a.y, b.y)
+	var d := Vector3(b.x - a.x, 0.0, b.z - a.z)
+	if d.length() < 0.05:
+		return ""
+	var side := Vector3(-d.z, 0.0, d.x).normalized()
+	var reach := BRIDGE_MIN_WIDTH
+	for t in [0.15, 0.3, 0.5, 0.7, 0.85]:
+		for hgt in [0.6, 1.1, 1.5]:
+			var c := a.lerp(b, t)
+			c.y = top + hgt
+			var w := 0.0
+			for sg in [-1.0, 1.0]:
+				var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(c, c + side * sg * reach, mask))
+				w += c.distance_to(hit.position) if not hit.is_empty() else reach
+			if w < BRIDGE_MIN_WIDTH:
+				return "Spalt zu schmal (%.2f m)" % w
+	return ""
+
 
 static func _uf_find(uf: Array, x: int) -> int:
 	while uf[x] != x:

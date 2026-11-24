@@ -4,6 +4,8 @@ extends RefCounted
 
 var lb: LevelBuilder
 const House16Plan := preload("res://src/maps/bavaria/house16_plan.gd")
+const EzTree := preload("res://src/maps/bavaria/eztree.gd")
+const LibraryModels := preload("res://src/maps/bavaria/library_models.gd")
 const PLASTER_TEXTURED := ["haus_16", "haus_18_shed", "haus_18", "haus_18_extension", "haus_14", "haus_16_passage", "haus_16_passage_return"]
 var rng := RandomNumberGenerator.new()
 var _models := {}
@@ -73,13 +75,30 @@ func _init(builder: LevelBuilder) -> void:
 
 func prop(model: String, pos: Vector3, yaw := 0.0, scale_value := 1.0, collide := false) -> Node3D:
 	var key := model.to_lower()
+	var ez := EzTree.is_key(key)
 	if not _models.has(key):
-		var path := OrigLevel.cache_root() + "/czech3/models/" + key + ".glb"
-		_models[key] = OrigLevel.parse_glb(path)
-		if _models[key] == null:
-			missing.append(path)
-		elif key in ["l_tree", "l_tree2", "l_tree4", "e_treb1"]:
-			_upgrade_tree_textures(_models[key])
+		if ez:
+			_models[key] = EzTree.load_template(key)
+			if _models[key] == null:
+				missing.append(EzTree.DIR + key + ".glb")
+		elif LibraryModels.is_lib_key(key):
+			# Projekteigenes Modell ohne Originalvorlage (z. B. „lib:strauch_sommer_1“)
+			_models[key] = LibraryModels.load_model(key.substr(4))
+			if _models[key] == null:
+				missing.append(LibraryModels.DIR + key.substr(4) + ".glb")
+		else:
+			var path := OrigLevel.cache_root() + "/czech3/models/" + key + ".glb"
+			_models[key] = OrigLevel.parse_glb(path)
+			if _models[key] == null:
+				missing.append(path)
+			elif key in ["l_tree", "l_tree2", "l_tree4", "e_treb1"]:
+				_upgrade_tree_textures(_models[key])
+			# Projekteigenes Ersatzmodell bei passender Größe/Funktion (--lib_models=0 = Original)
+			var lib := LibraryModels.replacement(key, _models[key], mesh_bounds)
+			if lib:
+				if _models[key]:
+					(_models[key] as Node3D).free()
+				_models[key] = lib
 	var template: Node3D = _models[key]
 	if template == null:
 		return null
@@ -91,19 +110,21 @@ func prop(model: String, pos: Vector3, yaw := 0.0, scale_value := 1.0, collide :
 	lb.static_root.add_child(n)
 	var bounds := mesh_bounds(content, Transform3D.IDENTITY)
 	var ground_y := bounds.position.y
-	if key in ["l_tree", "l_tree2", "l_tree4", "e_treb1"]:
+	if key in ["l_tree", "l_tree2", "l_tree4", "e_treb1"] or ez:
 		if not _model_vertex_bounds.has(key):
 			_model_vertex_bounds[key] = vertex_bounds(content, Transform3D.IDENTITY)
 		ground_y = (_model_vertex_bounds[key] as AABB).position.y
 	# Die Modelle behalten ihre natürlichen Proportionen; lediglich Boden/Modellursprung normalisieren.
 	var offset := Vector3(bounds.get_center().x, ground_y, bounds.get_center().z)
+	if ez:
+		offset = Vector3(0, ground_y, 0)      # EZ-Tree: Stammfuß liegt im Ursprung (Krone kann asymmetrisch sein)
 	content.position -= offset
 	n.position = pos
 	n.rotation.y = yaw
 	n.scale = Vector3.ONE * scale_value
 	if collide:
 		_mesh_colliders(n)
-	if key in ["l_tree", "l_tree2", "l_tree4", "e_treb1"]:
+	if key in ["l_tree", "l_tree2", "l_tree4", "e_treb1"] or ez:
 		n.add_to_group("bavaria_all_tree_roots")
 		n.set_meta("species",key)
 	reused_models += 1
@@ -175,6 +196,8 @@ static var _tree_far_mesh := {}
 func tree_far_mesh(mesh: Mesh) -> Mesh:
 	if mesh == null:
 		return mesh
+	if mesh.has_meta("ez_lod3"):
+		return mesh.get_meta("ez_lod3")      # EZ-Tree: gröbste Stufe für den dichten Außenwald
 	if _tree_far_mesh.has(mesh):
 		return _tree_far_mesh[mesh]
 	var out: Mesh = mesh
@@ -191,6 +214,14 @@ func tree_far_mesh(mesh: Mesh) -> Mesh:
 				out.surface_set_material(s, mats[s])
 	_tree_far_mesh[mesh] = out
 	return out
+
+## Vordere Reihen des dichten Außenwalds: ebenfalls gröbste EZ-Tree-Stufe (Dreiecksbudget); Originalmeshes unverändert.
+func tree_near_mesh(mesh: Mesh) -> Mesh:
+	return EzTree.lod_mesh(mesh, 3)
+
+## Baumart für einen Platz: mit EZ-Tree deterministisch nach Ort, sonst die bisherige Originalart.
+func tree_key(orig_key: String, context: String, pos: Vector3, scale_value := 1.0) -> String:
+	return EzTree.pick(context, pos, scale_value) if EzTree.enabled() else orig_key
 
 func _tree_hq_texture(file: String, orig: Texture2D) -> Texture2D:
 	if file == "" or orig == null:
@@ -846,6 +877,12 @@ func _woodland_shed(pos: Vector3,w: float,d: float,h: float,yaw: float) -> Node3
 	n.set_meta("building_kind","barn")
 	n.set_meta("entry_points",[{"point":Vector3(door_x,0,d*0.5),"normal":Vector3(0,0,1),"approach":1.5}])
 	n.set_meta("mg_aperture",Vector3(-w*0.5,1.5,0))
+	# Türangel auf die Ostseite (vom Giebel weg): Seit die Türflügel wirklich in ihren Öffnungen sitzen (door.gd/level_builder),
+	# lag der offene Flügel quer im einzigen Weg vom Eingang zum MG42 (Navmesh kennt keine Türen) → Soldat/KI hingen fest.
+	var door_at := n.to_global(Vector3(door_x,0,d*0.5))
+	for dn in lb.dynamic_root.get_children():
+		if dn is Door and (dn as Door).global_position.distance_to(door_at) < 0.8:
+			(dn as Door).rotate_y(PI)
 	# Tor wird zur Schießöffnung: niedrige Brüstung und tragender Sturz, dazwischen frei.
 	lb.box(Vector3(-w*0.5,0,0),Vector3(0.3,0.95,2.3),"wood",0,true,n)
 	lb.box(Vector3(-w*0.5,2.10,0),Vector3(0.3,h-2.4,2.3),"wood",0,true,n)

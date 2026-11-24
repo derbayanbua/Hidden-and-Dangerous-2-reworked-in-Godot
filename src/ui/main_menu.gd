@@ -1480,6 +1480,9 @@ static func rebuild_credits() -> Array:
 		# 0.10.8: Fremdquellen (Lizenzhinweise vollständig in THIRD_PARTY_LICENSES.txt)
 		{"style": "SM", "text": "FREMDQUELLEN"}, es,
 		{"style": "SM", "text": "Wassershader angelehnt an „Water shader 3D (Godot 4.3)“ von Lesus (godotshaders.com), CC0 1.0"},
+		{"style": "SM", "text": "Bäume der Testkarte Bavaria erzeugt mit EZ-Tree (github.com/dgreenheck/ez-tree), MIT, Copyright (c) 2024 Daniel Greenheck"},
+		{"style": "SM", "text": "Trees of the test map Bavaria generated with EZ-Tree (github.com/dgreenheck/ez-tree), MIT, Copyright (c) 2024 Daniel Greenheck"},
+		{"style": "SM", "text": "Rindentexturen / bark textures: ambientCG (ambientcg.com), CC0 1.0"},
 		{"style": "SM", "text": "Lizenzhinweise: THIRD_PARTY_LICENSES.txt"},
 		el,
 		{"style": "SM", "text": "DANK"}, es,

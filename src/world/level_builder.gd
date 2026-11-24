@@ -291,9 +291,10 @@ func building(center: Vector3, w: float, d: float, h: float, wall_mat: String, r
 				var door := Door.new()
 				door.width = 1.35
 				var local_pos: Vector3 = info[0] + Basis(Vector3.UP, info[2]) * Vector3(gp[0], 0, 0)
+				# Lage VOR dem Eintritt in den Baum setzen (Flügelkörper entsteht in Door._ready an dieser Lage)
+				var gxf := Transform3D(Basis(Vector3.UP, yaw + info[2]), root.global_transform * local_pos)
+				door.transform = dynamic_root.global_transform.affine_inverse() * gxf
 				dynamic_root.add_child(door)
-				door.global_position = root.to_global(local_pos)
-				door.global_rotation.y = yaw + info[2]
 	if flat_roof:
 		# Flachdach mit Brüstung (Lehmbauweise)
 		box(Vector3(0, h, 0), Vector3(w + 0.3, 0.25, d + 0.3), roof_mat, 0.0, true, root)

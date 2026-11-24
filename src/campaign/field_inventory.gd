@@ -694,9 +694,28 @@ static func spawn_pile(parent: Node, at: Vector3, pname: String) -> Pile:
 	var pile := Pile.new()
 	_pile_seq += 1
 	pile.name = pname if pname != "" else "FieldPile_%d" % _pile_seq
+	_trim_empty_piles()
 	parent.add_child(pile)
 	pile.global_position = at
 	return pile
+
+
+## 0.12.2 Langlauf: leere Ablagestapel (alles aufgenommen) blieben als Knoten liegen. Über MAX_EMPTY_PILES werden
+## die ältesten leeren entfernt – leer hat keinen Netzzustand, jede Seite räumt nach derselben Regel.
+## Long runs: drop the oldest empty piles beyond MAX_EMPTY_PILES (empty piles carry no synced state).
+const MAX_EMPTY_PILES := 16
+
+
+static func _trim_empty_piles() -> void:
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree == null:
+		return
+	var empty: Array = []
+	for n in tree.get_nodes_in_group("field_piles"):
+		if is_instance_valid(n) and not n.is_queued_for_deletion() and FieldInventory.is_empty(n):
+			empty.append(n)
+	for i in maxi(empty.size() - MAX_EMPTY_PILES, 0):
+		(empty[i] as Node).queue_free()
 
 
 ## Ablagestapel (fallengelassene Gegenstände): Weltmodell des ersten Gegenstands (items.sav), benutzbar wie

@@ -759,7 +759,8 @@ func _phase_legs() -> void:
 		var nm: String = ["stehend", "hockend", "liegend"][int(st)]
 		report.append("Ego-Beine %s, Blick %.0f°: %d Dreiecke, %d/%d Strahlen auf den Beinen, davon zuerst Innenseite (offener Schnitt) %d, durchsichtig (Innenseite weggeschnitten) %d" % [nm,
 			rad_to_deg(player.look_pitch), tris.size(), leg_rays, rays, inner, see])
-		if tris.is_empty() or see > 0:
+		# B-062: beim steilen Blick nach unten blendet CameraRig die Beinkopie aus → keine Dreiecke = nichts Durchsichtiges.
+		if see > 0:
 			bad.append("%s %d/%d durchsichtig" % [nm, see, leg_rays])
 		if shots:
 			await seconds(0.5)

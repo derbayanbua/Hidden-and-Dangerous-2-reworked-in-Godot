@@ -190,7 +190,8 @@ func _run() -> void:
 			e.died.connect(func(by): deaths[nm] = String(by.name) if by is Node else "-")
 	# af1_finale2: Fahrzeuge und lose Starrkörper überwachen (Hochschleudern)
 	for n in m.find_children("*", "RigidBody3D", true, false):
-		_mon.append(n)
+		if not n is Grenade:
+			_mon.append(n)
 	for nm in REINF:
 		var e := _enemy(m, nm)
 		if e:
@@ -222,7 +223,9 @@ func _run() -> void:
 		if i % 4 == 0:
 			# neu entstandene Starrkörper (Helme, Trümmer, Deckel, Gore-Teile) mit überwachen
 			for n in m.get_tree().root.find_children("*", "RigidBody3D", true, false):
-				if not n in _mon:
+				# Geschosse (Grenade: Handgranaten, Panzerfaust-/Bazooka-Raketen) sind gewollt schnell – Abschuss/Aufschlag
+				# ist kein Hochschleudern (vorher FAIL „@RigidBody3D dv 296“ = Rakete eines Wellensoldaten)
+				if not n in _mon and not n is Grenade:
 					_mon.append(n)
 					print("AF1FIN neuer Koerper %s bei %s (Panzer %s)" % [n.get_path(), n.global_position, tank.global_position if tank else Vector3.ZERO])
 		for nm in watch:

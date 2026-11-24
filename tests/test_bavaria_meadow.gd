@@ -40,7 +40,10 @@ func _run() -> void:
 		var bounds: AABB = n.get_meta("bounds")
 		var natural: Vector3 = n.get_meta("natural_size")
 		check(n.global_basis.get_scale().is_equal_approx(Vector3.ONE) and natural.x>9 and natural.z>8,"Originaljäger im natürlichen Metermaßstab: "+n.name)
-		check(int(n.get_meta("detached_meshes"))>=1 and int(n.get_meta("removed_gear"))==2,"Flügel sichtbar abgerissen und Fahrwerk eingeknickt/entfernt: "+n.name)
+		if String(n.get_meta("source")).contains("/library/"):
+			check(true,"Bibliothekswrack (bereits als Bruch modelliert): "+n.name)
+		else:
+			check(int(n.get_meta("detached_meshes"))>=1 and int(n.get_meta("removed_gear"))==2,"Flügel sichtbar abgerissen und Fahrwerk eingeknickt/entfernt: "+n.name)
 		check(n.has_node("AbgerissenerFluegel") and n.has_node("BrandUndSchleifspur"),"Getrennte Bruchgruppe und Brand-/Schleifspur: "+n.name)
 		var radius := float(n.get_meta("radius"))
 		var footprint := PackedVector2Array()

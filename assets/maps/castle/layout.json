@@ -1,0 +1,36 @@
+{
+	"format": 1,
+	"comment": "Testkarte Castle / test map Castle. Platzhalter-Layout in Metern (x = Ost, z = Sued, Norden = -z). Placeholder layout in metres; replace data only.",
+	"boundary": [[-100, -92], [-92, -100], [92, -100], [100, -92], [100, 92], [92, 100], [-92, 100], [-100, 92]],
+	"terrain": {"amplitude": 0.6, "wavelength_x": 46.0, "wavelength_z": 62.0, "grid_step": 2.0, "outer_margin": 30.0, "material": "grass"},
+	"blocks": [
+		{"id": "wall_n", "kind": "wall", "center": [0, -70], "size": [60, 2, 7], "yaw_deg": 0, "material": "stone"},
+		{"id": "wall_w", "kind": "wall", "center": [-30, -45], "size": [2, 50, 7], "yaw_deg": 0, "material": "stone"},
+		{"id": "wall_e", "kind": "wall", "center": [30, -45], "size": [2, 50, 7], "yaw_deg": 0, "material": "stone"},
+		{"id": "wall_s_w", "kind": "wall", "center": [-18, -20], "size": [24, 2, 7], "yaw_deg": 0, "material": "stone"},
+		{"id": "wall_s_e", "kind": "wall", "center": [18, -20], "size": [24, 2, 7], "yaw_deg": 0, "material": "stone"},
+		{"id": "tower_nw", "kind": "tower", "center": [-30, -70], "size": [6, 6, 12], "yaw_deg": 0, "material": "stone"},
+		{"id": "tower_ne", "kind": "tower", "center": [30, -70], "size": [6, 6, 12], "yaw_deg": 0, "material": "stone"},
+		{"id": "tower_sw", "kind": "tower", "center": [-30, -20], "size": [6, 6, 12], "yaw_deg": 0, "material": "stone"},
+		{"id": "tower_se", "kind": "tower", "center": [30, -20], "size": [6, 6, 12], "yaw_deg": 0, "material": "stone"},
+		{"id": "keep", "kind": "tower", "center": [8, -55], "size": [9, 9, 20], "yaw_deg": 0, "material": "stone"},
+		{"id": "hall", "kind": "building", "center": [-12, -62], "size": [22, 8, 10], "yaw_deg": 0, "material": "plaster"},
+		{"id": "house_w", "kind": "building", "center": [-55, 25], "size": [12, 8, 6], "yaw_deg": 0, "material": "plaster"},
+		{"id": "house_e", "kind": "building", "center": [50, 30], "size": [10, 8, 6], "yaw_deg": 15, "material": "plaster"},
+		{"id": "barn", "kind": "building", "center": [0, 55], "size": [16, 10, 7], "yaw_deg": 0, "material": "wood"}
+	],
+	"spawns": [
+		{"pos": [-85, -80], "team": 0}, {"pos": [-85, -40], "team": 0}, {"pos": [-85, 0], "team": 0}, {"pos": [-85, 40], "team": 0},
+		{"pos": [-85, 80], "team": 0}, {"pos": [-50, 85], "team": 0}, {"pos": [-40, 0], "team": 0}, {"pos": [-60, -30], "team": 0},
+		{"pos": [85, -80], "team": 1}, {"pos": [85, -40], "team": 1}, {"pos": [85, 0], "team": 1}, {"pos": [85, 40], "team": 1},
+		{"pos": [85, 80], "team": 1}, {"pos": [50, 85], "team": 1}, {"pos": [40, 0], "team": 1}, {"pos": [60, -30], "team": 1}
+	],
+	"occupation_zones": [
+		{"id": "zone_a", "name": "A – Vorburg West", "pos": [-70, 60], "radius": 15, "owner": 0, "capture_time_s": 15},
+		{"id": "zone_b", "name": "B – Burghof", "pos": [-10, -35], "radius": 12, "owner": -1, "capture_time_s": 15},
+		{"id": "zone_c", "name": "C – Torplatz", "pos": [0, -5], "radius": 14, "owner": -1, "capture_time_s": 15},
+		{"id": "zone_d", "name": "D – Scheune", "pos": [0, 38], "radius": 12, "owner": -1, "capture_time_s": 15},
+		{"id": "zone_e", "name": "E – Ostflanke", "pos": [75, -60], "radius": 15, "owner": 1, "capture_time_s": 15}
+	],
+	"zone_slot_offsets": [[-2.5, -2.5], [2.5, -2.5], [-2.5, 2.5], [2.5, 2.5]]
+}

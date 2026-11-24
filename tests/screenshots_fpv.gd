@@ -100,6 +100,26 @@ func _run() -> void:
 	rig.toggle_mode()
 	await frames(80)
 	await shot("f08_1st_person")
+	# 0.12.2 Blick nach unten (Beinkopie): -88°/-40°, stehend und hockend; Spieler unverwundbar (Gesundheit nachgefüllt)
+	var down_shots := [["f17_down88_stehen", -88.0, Soldier.Stance.STAND], ["f18_down40_stehen", -40.0, Soldier.Stance.STAND],
+		["f19_down88_hocken", -88.0, Soldier.Stance.CROUCH], ["f20_down40_hocken", -40.0, Soldier.Stance.CROUCH]]
+	for d in down_shots:
+		s.health = s.max_health
+		s.stance_request = d[2]
+		s.look_pitch = deg_to_rad(d[1])
+		await frames(90)
+		s.health = s.max_health
+		print("FPVBODY ", d[0], " mode=", s.model.fpv_body_mode, " legs=", s.model.fpv_leg_meshes().size())
+		if not Game.cli.has("shots") or Array(Game.cli["shots"].split(",")).has(String(d[0]).substr(0, 3)):
+			await frames(25)
+			get_viewport().get_texture().get_image().save_png(OUT + "shot_%s.png" % d[0])
+			print("SHOT ", d[0])
+	if Game.cli.get("fpv_down_only", "") == "1":
+		get_tree().quit()
+		return
+	s.stance_request = Soldier.Stance.STAND
+	s.look_pitch = 0.0
+	await frames(90)
 	# Nachladen 1. Person (Mitte der Animation)
 	s.current_weapon().in_mag = 3
 	s.reload()

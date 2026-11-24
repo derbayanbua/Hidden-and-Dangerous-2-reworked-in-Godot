@@ -18,6 +18,9 @@ func _ready() -> void:
 	add_child(_hinge)
 	_body = AnimatableBody3D.new()
 	_body.collision_layer = 1
+	# Flügel folgt dem Türknoten/Drehpunkt (Tween, nachträgliches Versetzen). Mit sync_to_physics blieb der Körper an der
+	# Lage beim Eintritt in den Baum (Weltursprung) → Türflügel lagen verstreut in der Karte, Kollision dort.
+	_body.sync_to_physics = false
 	_body.position = Vector3(width * 0.5, height * 0.5, 0)
 	_hinge.add_child(_body)
 	var cs := CollisionShape3D.new()
@@ -47,7 +50,10 @@ func _ready() -> void:
 func interact(s: Soldier) -> void:
 	# Tür öffnet sich von der Person weg
 	var local := global_basis.inverse() * (s.global_position - global_position)
-	_open_sign = -1.0 if local.z > 0.0 else 1.0
+	# Drehung um +Y um +90° bringt den Flügel (lokal +X ab Drehpunkt) nach −Z. Steht die Person auf +Z, muss der Flügel
+	# also positiv drehen. Vorher war das Vorzeichen vertauscht: der Flügel schwang AUF die Person zu und stand danach
+	# quer auf ihrer Seite der Öffnung (KI-Bots hingen davor fest, Navmesh kennt Türflügel nicht).
+	_open_sign = 1.0 if local.z > 0.0 else -1.0
 	set_open(not is_open)
 	Events.emit_noise(global_position, 6.0, s, s.team, &"door")
 	super.interact(s)

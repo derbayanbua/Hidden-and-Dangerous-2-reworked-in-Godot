@@ -209,7 +209,8 @@ static func build_cover(m) -> int:
 					break
 			if found:
 				break
-		if not found:
+		# Heu ist Zierde: kein Ersatzplatz, damit es Erdwällen/Nestern keinen freien Wiesenplatz wegnimmt.
+		if not found and kind not in ["hay", "haystack"]:
 			# Ersatzplatz: freiester Punkt der Wiese (2-m-Raster), nächster zur Wunschposition
 			var meadow: PackedVector2Array = m.polygon(m.layout["meadow"])
 			var bb := Rect2(meadow[0], Vector2.ZERO)

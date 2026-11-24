@@ -1,0 +1,21 @@
+Kulisse Testkarte Castle – Herkunft der Dateien / origin of the files
+=====================================================================
+
+Quelle: Bavaria_Godot_Assetpack_18 (selbst erzeugt, frei; eigene Texturen-Bibliothek des Projekts)
+Source: Bavaria_Godot_Assetpack_18 (self-created, free; the project's own texture library)
+
+Übernommen (nur benötigte Dateien, umbenannt, inhaltlich unverändert bis auf die genannte Aufbereitung):
+
+- fassaden_atlas.png / fassaden_atlas.json
+    8 Altstadt-Fassaden-Billboards des Pakets (textures/fassaden/altstadt_*.png), je auf den sichtbaren
+    Bereich (Alpha) zugeschnitten und auf 512 x 640 px skaliert, als 4 x 2-Atlas zusammengesetzt.
+    json: Motivname und Seitenverhältnis (Höhe/Breite) je Zelle, Reihenfolge = Atlaszellen zeilenweise.
+- kirchturm.glb          <- models/neue_3d/kirchturm_altstadt_1945.glb (Knotennamen neutral umbenannt)
+- see_schilf.glb         <- models/neue_3d/*_schilfgruppe.glb (Knotennamen neutral umbenannt)
+- see_steg_6m.glb        <- models/neue_3d/*_bootssteg_6m.glb (Knotennamen neutral umbenannt)
+- see_ufersteine.glb     <- models/neue_3d/*_ufersteine.glb (Knotennamen neutral umbenannt)
+- see_uferkante_4m.glb   <- models/neue_3d/*_uferkante_4m.glb (Knotennamen neutral umbenannt)
+
+Verwendung: src/maps/castle/castle_backdrop.gd (nur Optik, keine Kollision, nicht in der Navmesh-Quelle).
+
+*_0.png / *_1.png: vom Godot-Import aus den GLBs herausgelöste eingebettete Texturen (gleiche Herkunft).

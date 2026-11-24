@@ -5,6 +5,9 @@ var t: RefCounted
 var roots: Array[Node3D] = []
 var footprints: Array[PackedVector2Array] = []
 var missing: Array[String] = []
+var site_yaw := 0.0
+const LibraryModels := preload("res://src/maps/bavaria/library_models.gd")
+const FieldTrenches := preload("res://src/maps/bavaria/field_trenches.gd")
 
 func build(mission: Mission) -> void:
 	m = mission
@@ -19,6 +22,13 @@ func build(mission: Mission) -> void:
 func _aircraft(id: String, model: String, ref: Array, yaw: float) -> void:
 	var path := OrigLevel.cache_root()+"/africa2/models/"+model+".glb"
 	var content := OrigLevel.parse_glb(path)
+	# Projekteigenes Flugzeugwrack bei passendem Grundriss (--lib_models=0 = Original)
+	var lib := LibraryModels.replacement(model, content, t.mesh_bounds, LibraryModels.WRECKS)
+	if lib:
+		if content:
+			content.free()
+		content = lib
+		path = LibraryModels.DIR + String(lib.get_meta("library_model")) + ".glb"
 	if content == null:
 		missing.append(path)
 		t.missing.append(path)
@@ -78,6 +88,7 @@ func _aircraft(id: String, model: String, ref: Array, yaw: float) -> void:
 	if not center.is_finite():
 		n.free()
 		return
+	yaw = site_yaw
 	n.position = center
 	n.rotation.y = yaw
 	var polygon := _footprint(center,bounds,yaw,1.6)
@@ -177,7 +188,7 @@ func _distance(q: Vector2, poly: PackedVector2Array) -> float:
 		distance = minf(distance,q.distance_to(Geometry2D.get_closest_point_to_segment(q,poly[i],poly[(i+1)%poly.size()])))
 	return distance
 
-func _safe(center: Vector3, bounds: AABB, yaw: float) -> bool:
+func _safe(center: Vector3, bounds: AABB, yaw: float, trench := true, covers := true) -> bool:
 	# Real orientierte Grundfläche samt 1,6m Seitenroute statt zu großer Kreisscheibe.
 	var poly := _footprint(center,bounds,yaw,1.6)
 	var meadow: PackedVector2Array = m.polygon(m.layout.meadow)
@@ -187,7 +198,32 @@ func _safe(center: Vector3, bounds: AABB, yaw: float) -> bool:
 	for old in footprints:
 		if not Geometry2D.intersect_polygons(poly,old).is_empty():
 			return false
+	# Grundriss und Seitenroute nicht auf/durch Schützengraben samt Brustwehr (Soldatenkapsel/KI-Weg müssen vorbeikommen).
+	var strips: Array[PackedVector2Array] = [_footprint(center,bounds,yaw,0.0)]
+	for side in [-1.0,1.0]:
+		var x0: float = bounds.position.x-1.54 if side<0 else bounds.end.x+0.86
+		var strip := PackedVector2Array()
+		for corner in [Vector2(x0,bounds.position.z-0.94),Vector2(x0+0.68,bounds.position.z-0.94),Vector2(x0+0.68,bounds.end.z+0.94),Vector2(x0,bounds.end.z+0.94)]:
+			var w := center+Basis(Vector3.UP,yaw)*Vector3(corner.x,0,corner.y)
+			strip.append(Vector2(w.x,w.z))
+		strips.append(strip)
+	# Beim Ausweichen auch die Wunschplätze der Felddeckungen (Heu, Erdwälle, Nester) nicht belegen.
+	for cover in (FieldTrenches.COVERS if trench and covers else []):
+		if cover[0] in ["hay","berm","sandbag_nest"] and _distance(cover[1],poly) < 2.2:
+			return false
+	for hole in (FieldTrenches.hole_polygons() if trench else []):
+		for grown in Geometry2D.offset_polygon(hole,0.2):
+			for strip in strips:
+				if not Geometry2D.intersect_polygons(strip,grown).is_empty():
+					return false
 	var actual := _footprint(center,bounds,yaw,0.0)
+	# Wiesenmitte (Blick zum Turm) frei halten.
+	var mc := Vector2.ZERO
+	for q in meadow:
+		mc += q
+	mc /= maxi(meadow.size(),1)
+	if _distance(mc,actual)<9.5:
+		return false
 	for protection in [[m.pixel([575,554]),5.5],[m.pixel([690,490]),4.2]]:
 		if _distance(Vector2(protection[0].x,protection[0].z),actual)<float(protection[1]):
 			return false
@@ -212,12 +248,43 @@ func _safe(center: Vector3, bounds: AABB, yaw: float) -> bool:
 
 func _site(ref: Array, _radius: float, bounds: AABB, yaw: float) -> Vector3:
 	var desired: Vector3 = m.pixel(ref)
+	# Platz wie bisher suchen; schneidet er einen Schützengraben (Seitenroute/Grundriss), dort zuerst drehen,
+	# erst danach weiterrücken.
+	var base := Vector3.INF
 	for ring in 40:
-		for i in 48:
+		for i in (1 if ring == 0 else 48):
 			var angle := TAU*float(i)/48.0
 			var candidate := desired+Vector3(cos(angle),0,sin(angle))*float(ring)*1.25
-			if _safe(candidate,bounds,yaw):
+			if base == Vector3.INF and _safe(candidate,bounds,yaw,false):
+				base = candidate
+	site_yaw = yaw
+	if base != Vector3.INF and _safe(base,bounds,yaw,true,false):
+		return base
+	if base != Vector3.INF:
+		for ring in 9:
+			for i in (1 if ring == 0 else 24):
+				var angle := TAU*float(i)/24.0
+				var candidate := base+Vector3(cos(angle),0,sin(angle))*float(ring)*1.25
+				for turn in [0.0,0.35,-0.35,0.7,-0.7,1.05,-1.05,PI*0.5,-PI*0.5,PI]:
+					if _safe(candidate,bounds,yaw+turn):
+						site_yaw = yaw+turn
+						return candidate
+	for ring in 40:
+		for i in (1 if ring == 0 else 48):
+			var angle := TAU*float(i)/48.0
+			var candidate := desired+Vector3(cos(angle),0,sin(angle))*float(ring)*1.25
+			if _safe(candidate,bounds,yaw,true,false):
 				return candidate
+	# Notfalls in der Nähe des bisherigen Platzes gedreht, ohne Rücksicht auf die Wunschplätze der Felddeckungen.
+	if base != Vector3.INF:
+		for ring in 9:
+			for i in (1 if ring == 0 else 24):
+				var angle := TAU*float(i)/24.0
+				var candidate := base+Vector3(cos(angle),0,sin(angle))*float(ring)*1.25
+				for turn in [0.0,0.35,-0.35,0.7,-0.7,1.05,-1.05,PI*0.5,-PI*0.5,PI]:
+					if _safe(candidate,bounds,yaw+turn,true,false):
+						site_yaw = yaw+turn
+						return candidate
 	push_error("Kein sicherer Flugzeug-Wrackplatz an "+str(ref))
 	return Vector3.INF
 

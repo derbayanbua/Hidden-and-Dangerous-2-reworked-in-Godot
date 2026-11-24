@@ -10,7 +10,7 @@ extends RefCounted
 ## Dazu Stellungssuche: Halteplatz in der Zone (Deckung, Abstand), Camper-/Scharfschützenstellung mit Sichtlinie.
 ## Zielpunkte liegen immer auf dem Navigationsnetz; unerreichbare Ziele werden gemieden (Sperrliste je Bot).
 
-static var _zone_pts := {}       ## "<mission>:<zone>" -> Netzpunkt in der Zone
+static var _zone_pts := {}       ## "<mission>:<zone>:<team>" -> [Netzpunkt in der Zone, gültig bis (−1 = immer)]
 static var armed_by := {}         ## Sprengplatz (instance_id) -> Team, das die Ladung angebracht hat
 static var _obj_pts := {}        ## "<mission>:<aufgabe>" -> [Netzpunkt, Interactable]
 
@@ -44,10 +44,16 @@ static func zone_radius(z: Dictionary) -> float:
 
 ## Netzpunkt innerhalb der Zone (Mittelpunkt kann in der Luft liegen → Boden, Spawnplätze, Ring)
 static func zone_point(b: Node, m: Node, i: int) -> Vector3:
-	var key := "%d:%d" % [m.get_instance_id(), i]
-	if _zone_pts.has(key):
-		return _zone_pts[key]
+	# 0.12.2 (B-009): Zwischenspeicher je Team. Vorher je Karte mit der Erreichbarkeit vom ERSTEN fragenden Bot gewählt
+	# (oft Gegnerseite/abgetrennte Spawninsel) und auch ein unerreichbarer Ersatzpunkt dauerhaft gespeichert → Zone für
+	# das andere Team „unerreichbar“, Sperrliste, Zielpendeln (czech4_mp_zone 44 Zielwechsel, burma1_mp_zone 60 %).
+	# Nur ein erreichbarer Punkt bleibt; ein Ersatzpunkt gilt 10 s, dann neue Suche vom aktuellen Standort.
 	var s: Soldier = b.soldier
+	var key := "%d:%d:%d" % [m.get_instance_id(), i, s.team]
+	if _zone_pts.has(key):
+		var e: Array = _zone_pts[key]
+		if float(e[1]) < 0.0 or float(e[1]) > now():
+			return e[0]
 	var z: Dictionary = m.mp_zones()[i]
 	var c: Vector3 = (z["xf"] as Transform3D).origin
 	var r := zone_radius(z)
@@ -61,21 +67,29 @@ static func zone_point(b: Node, m: Node, i: int) -> Vector3:
 	# erster Netzpunkt in der Zone, der vom Bot aus über das Netz erreichbar ist (Dach/abgetrennte Fläche meiden)
 	var best := Vector3.INF
 	var first := Vector3.INF
+	var tries := 0
 	for p in cands:
 		var q := BotNav.closest(s, p)
 		if not in_zone(z, q) or BotNav.flat(q, p) > 2.5:
 			continue
 		if not first.is_finite():
 			first = q
-		if not BotNav.nav_ready(s) or BotNav.path_cost(s, s.global_position, q) < INF:
+		if not BotNav.nav_ready(s):
 			best = q
 			break
+		tries += 1
+		if tries > 8:
+			break                    # Pfadabfragen begrenzt (je Zone höchstens 8)
+		if BotNav.path_cost(s, s.global_position, q) < INF:
+			best = q
+			break
+	var reach := best.is_finite()
 	if not best.is_finite():
 		best = first
 	if not best.is_finite():
 		best = BotNav.closest(s, ground(s, c))
 	if BotNav.nav_ready(s):
-		_zone_pts[key] = best
+		_zone_pts[key] = [best, -1.0 if reach else now() + 10.0]
 	return best
 
 

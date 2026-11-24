@@ -1,0 +1,15 @@
+Herkunft / origin: Bavaria 1945 Assetpack 16 "Modularer Burgbaukasten" (D:\Workspace_D\Texturen\Bavaria_Godot_Burgbaukasten_Assetpack_16),
+Modelle aus models/modular/, Texturen aus textures/materials/ (Albedo/Normal/Roughness), unveraendert kopiert.
+Lizenz: selbst erzeugt, frei (eigene Assets des Projekts; keine fremden Spielmodelle).
+Kopiert: mauer_wehrgang_4m, mauer_zinnen_4m, turm_quadratisch_sockel_8m, turm_quadratisch_geschoss_8m, turm_quadratisch_zinnen_8m, toranlage_offen_8m, toranlage_schwer_8m
+Texturen: tuffmauer_moertel, stein_bruchmauer, kalkputz_abgewittert, putz_creme, dachziegel_rot, dachpfanne_braun_alt, treppenstein_abgelaufen, keller_erdreich, tuffstein_moosig, holz_eiche_altert
+Burgfassaden-Assetpack 17 (D:\Workspace_D\Texturen\Bavaria_Godot_Burgfassaden_Assetpack_17), unveraendert kopiert.
+Lizenz: selbst erzeugt, frei nutzbar (eigene Assets des Projekts).
+Modelle (models/): turmhelm_spitz_4m, turmhelm_spitz_knauf_4m, zwiebelhelm_uhrturm_4m, kamin_ziegel_1_7m, kamin_tuffstein_1_7m, dachgaube_klein_1_8m, nagelfluh_felsbrocken_01, nagelfluh_felsbrocken_02, nagelfluh_felsbrocken_03, nagelfluh_felsbrocken_04, erdgeschoss_tor_durchgang_8m
+Texturen (textures/, je _albedo/_normal/_roughness): kalkputz_geschoss_8m, kalkputz_fenster_2g_8m, kalkputz_fenster_3g_8m, kalkputz_fenster_4g_8m, kapelle_spitzbogen_8m, palas_fenster_8m, tuffwand_schiessscharten_8m, tuffwand_kleinfenster_8m, dach_biberschwanz_alt, dach_biberschwanz_verwittert, dach_moench_nonne_alt, dach_moench_nonne_verwittert, graben_erde_gras, hang_stuetzmauer_alt, nagelfluh_konglomerat, nagelfluh_moosig
+Assetpack 18 (D:\Workspace_D\Texturen\Bavaria_Godot_Assetpack_18, models/neue_3d/), unveraendert kopiert (Texturen in den GLB eingebettet).
+Lizenz: selbst erzeugt, frei.
+Modelle (models/): turm_deckenbalken_4m, turm_wendeltreppe_stein, turm_holzleiter_3m, turm_tisch_bauer, turm_holzbank, turm_waffenstaender, turm_strohsack, stacheldrahtrolle_3m, spanischer_reiter_holz_4m, tschechenigel_stahl, tarnnetz_stellung_4m, mg_nest_holz_sand, kanisterstapel_1945, fassstapel_1945, munitionskisten_1945, feldfunk_tisch_1944, scheinwerfer_stativ_1945, flak_erdwall_abgedeckt, feldkueche_feuerstelle, obstbaum_apfel_sommer, obstbaum_birne_sommer, hecke_sommer_4m, gemuesebeet_kohl, gemuesebeet_moehren, brunnen_holzdach, hof_pflaster_kies_4x4, hof_grasrand_4mNachtrag 0.12.2 (Abgleich mit Referenzansichten der Hoefe), unveraendert kopiert, eigene freie Assets:
+Assetpack 14 (Burg-Modelle/-Fassaden, textures/materials/): hofpflaster -> katzenkopfpflaster_*, erdweg_kies -> erdweg_kies_* (Albedo/Normal/Roughness)
+Alpen 1945 Assetpack 06 (models/): strassenlampe_guss
+Alpen 1945 Assetpack 04 (models/): holzbank_3d

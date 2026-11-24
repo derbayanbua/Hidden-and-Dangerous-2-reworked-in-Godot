@@ -20,3 +20,46 @@ DANGEROUS AND HIDDEN 2 (unofficial) - Fremdquellen und Lizenzhinweise
 Sky HDRIs (assets/sky/*.hdr)
 Source: Poly Haven, https://polyhaven.com - Licence: CC0 1.0 (public domain dedication)
 List of files and URLs: docs/SKY_SOURCES.md
+
+------------------------------------------------------------------------
+3) Baeume der Testkarte Bavaria / Trees of the test map Bavaria
+   (assets/maps/bavaria/trees_eztree/, Details: SOURCES.txt dort / there)
+   DE: Baumgeometrie erzeugt mit dem Baumgenerator EZ-Tree, Laubkarten aus dessen Repository
+       (umgefaerbt). Rindentexturen von ambientCG (CC0 1.0), Birkenrinde eigene prozedurale Textur.
+   EN: Tree geometry generated with the EZ-Tree tree generator, leaf cards from its repository
+       (recoloured). Bark textures from ambientCG (CC0 1.0), birch bark is an own procedural texture.
+   Quelle / Source: https://github.com/dgreenheck/ez-tree  (Web-App: https://www.eztree.dev)
+   Lizenz / Licence: MIT
+
+   MIT License
+
+   Copyright (c) 2024 Daniel Greenheck
+
+   Permission is hereby granted, free of charge, to any person obtaining a copy
+   of this software and associated documentation files (the "Software"), to deal
+   in the Software without restriction, including without limitation the rights
+   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+   copies of the Software, and to permit persons to whom the Software is
+   furnished to do so, subject to the following conditions:
+
+   The above copyright notice and this permission notice shall be included in all
+   copies or substantial portions of the Software.
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   SOFTWARE.
+
+   Rinde / Bark: ambientCG, https://ambientcg.com - Bark001, Bark004, Bark006, Bark015
+   Lizenz / Licence: CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/)
+
+------------------------------------------------------------------------
+4) Bibliothekstexturen der Testkarte Bavaria / Library textures of the test map Bavaria
+   (assets/maps/bavaria/library/)
+   DE: Projekteigene, selbst erstellte Texturen (Putz, Stein, Dach, Holz, Kies) und
+       Low-Poly-Modelle (library/models/), frei nutzbar.
+   EN: Project-owned, self-made textures (plaster, stone, roof, wood, gravel) and
+       low-poly models (library/models/), free to use.

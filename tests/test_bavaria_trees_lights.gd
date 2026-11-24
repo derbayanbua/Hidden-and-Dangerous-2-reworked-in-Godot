@@ -58,7 +58,8 @@ func _run() -> void:
 		for group in ["bavaria_tree_batches","bavaria_hedge_batches"]:
 			for node in get_tree().get_nodes_in_group(group):
 				var mesh: Mesh = node.multimesh.mesh
-				if not String(mesh.resource_name) in ["l_tree_tree","l_tree2_tree","l_tree4_tree","e_treb1_hi1kmen"]:
+				var rn := String(mesh.resource_name)
+				if not (rn in ["l_tree_tree","l_tree2_tree","l_tree4_tree","e_treb1_hi1kmen","heckenstrauch_tree"] or (rn.begins_with("ez_") and rn.ends_with("_tree"))):
 					continue
 				for index in node.multimesh.instance_count:
 					actual_stems += 1

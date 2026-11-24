@@ -79,6 +79,14 @@ func _run() -> void:
 					dz = minf(dz, BotNav.flat((z["xf"] as Transform3D).origin, h.pos))
 				lines.append("stellung %s abstand_naechste_zone=%.1f m netz=%.1f m" % [str(h.pos.snapped(Vector3.ONE * 0.1)), dz,
 					BotNav.flat(BotNav.closest(host, h.pos), h.pos) if host else -1.0])
+	var emp_hints: Array = []
+	if m.has_method("bot_hints"):
+		for h in m.bot_hints(Vector3.ZERO, 10000.0):
+			if h.kind == "emplacement":
+				emp_hints.append(h.pos)
+	var emp_sel := 0              ## Proben mit beanspruchter Stellung (BotBrain._emp)
+	var emp_near_hold := 0        ## Proben: Mitglied hält ≤ 24 m an einer Stellung
+	var emp_min := INF            ## kleinster Abstand zum Halteplatz an der Stellung
 	var space: PhysicsDirectSpaceState3D = m.get_world_3d().direct_space_state
 	var anchor := {}
 	var anchor_t := {}
@@ -100,6 +108,12 @@ func _run() -> void:
 	var owners: Array = Net.zone_owner.duplicate()
 	var zone_changes := 0
 	var kills0 := _kills()
+	var trail := {}
+	var fell := {}
+	var circ := {}
+	var circling := 0
+	var goal_t0 := {}
+	var goal_times: Array = []
 	var t := 0.0
 	var start := now()
 	while t < dur:
@@ -124,6 +138,48 @@ func _run() -> void:
 			if s.mounted != null:
 				mounted_samples += 1
 			var wants: bool = b.has_move_target() and not s.is_climbing()
+			# Durchfallen: unter der Stollensohle (−3,9) → Spur der letzten 10 s ausgeben (einmal je Bot)
+			var hist: Array = trail.get(s, [])
+			hist.append("%s%s%s%s vy=%.1f" % [str(p.snapped(Vector3.ONE * 0.1)), " klettert" if s.is_climbing() else "",
+				" link" if b.nav.waypoints.size() > 0 else "", " boden" if s.is_on_floor() else " luft", s.velocity.y])
+			if b._emp != null:
+				emp_sel += 1
+				var ed: float = b.distance_to(b.hold_pos) if b.hold_pos.is_finite() else -1.0
+				emp_min = minf(emp_min, ed) if ed >= 0.0 else emp_min
+				if emp_sel % 20 == 1:
+					lines.append("stellung_anlauf %s bei %s halteplatz=%s abstand=%.2f sitz=%s zustand=%d frei=%s" % [s.soldier_name,
+						str(p.snapped(Vector3.ONE * 0.1)), str(b.hold_pos.snapped(Vector3.ONE * 0.1)), ed,
+						str(b._emp.gunner_spot().snapped(Vector3.ONE * 0.1)), int(b.state), b._emp.can_ai_mount(s)])
+			if b._holding and not b.is_leader():
+				for eh in emp_hints:
+					if BotNav.flat(p, eh) < 24.0:
+						emp_near_hold += 1
+						break
+			if hist.size() > 20:
+				hist.pop_front()
+			trail[s] = hist
+			if p.y < -4.6 and not fell.has(s):
+				fell[s] = true
+				lines.append("DURCHGEFALLEN %s bei %s, Spur: %s, Wegpunkte %s" % [s.soldier_name, str(p.snapped(Vector3.ONE * 0.1)),
+					" | ".join(hist), str(b.nav.waypoints)])
+			# Kreislaufen: im 20-s-Fenster > 15 m gelaufen, aber < 3 m vom Fensteranfang entfernt (will weiter laufen)
+			var cw: Array = circ.get(s, [p, p, 0.0, t])
+			cw[2] = float(cw[2]) + Vector2(p.x - cw[1].x, p.z - cw[1].z).length()
+			cw[1] = p
+			if t - float(cw[3]) >= 20.0:
+				if wants and float(cw[2]) > 15.0 and BotNav.flat(p, cw[0]) < 3.0:
+					circling += 1
+				cw = [p, p, 0.0, t]
+			circ[s] = cw
+			# Zeit bis Ziel: Zielzone gewählt → in der Zone
+			if m.has_method("mp_zones") and b.goal_zone >= 0 and b.goal_zone < m.mp_zones().size():
+				var gz: Dictionary = m.mp_zones()[b.goal_zone]
+				var gk := "%s_%d" % [s.soldier_name, b.goal_zone]
+				if not goal_t0.has(s) or goal_t0[s][0] != gk:
+					goal_t0[s] = [gk, t, false]
+				elif not goal_t0[s][2] and BotNav.flat(p, (gz.xf as Transform3D).origin) <= float(gz.radius) + 1.0:
+					goal_t0[s][2] = true
+					goal_times.append(t - float(goal_t0[s][1]))
 			if not anchor.has(s) or p.distance_to(anchor[s]) > 1.5 or not wants:
 				anchor[s] = p
 				anchor_t[s] = t
@@ -134,6 +190,10 @@ func _run() -> void:
 			if p.y < -0.6 and wants:
 				deep[s] = float(deep.get(s, 0.0)) + 0.5
 				deep_max = maxf(deep_max, deep[s])
+				if deep[s] >= 30.0 and fmod(deep[s], 10.0) < 0.25:
+					lines.append("unten %s %.0f s bei %s ziel=%s wp=%d/%d erreichbar=%s pendeln=%d" % [s.soldier_name, deep[s],
+						str(p.snapped(Vector3.ONE * 0.1)), str(b.nav.dest.snapped(Vector3.ONE * 0.1)), b.nav.wp_i, b.nav.waypoints.size(),
+						b.nav.reachable, b.nav.osc_events])
 			else:
 				deep[s] = 0.0
 			if p.y > 2.5:
@@ -168,6 +228,12 @@ func _run() -> void:
 	var over10 := sm.filter(func(x): return x > 10.0).size()
 	lines.append("dauer_s=%.0f bots=%d samples=%d" % [t, _bots().size(), samples])
 	lines.append("festhaengen_max_s=%.1f bots_ueber_10s=%d" % [worst, over10])
+	goal_times.sort()
+	var gmean := 0.0
+	for g in goal_times:
+		gmean += float(g)
+	lines.append("kreislaufen_fenster=%d zonen_erreicht=%d zeit_bis_zone_mittel_s=%.1f median_s=%.1f" % [circling, goal_times.size(),
+		gmean / maxf(goal_times.size(), 1), float(goal_times[goal_times.size() / 2]) if not goal_times.is_empty() else -1.0])
 	lines.append("halten_anteil_an_stellung=%.1f%% (halten %d, an Hinweis %d)" % [100.0 * hint_samples / maxf(hold_samples, 1), hold_samples, hint_samples])
 	lines.append("anteil_erhoeht=%.1f%% anteil_graben_keller=%.1f%% laengste_zeit_unten_s=%.1f" % [100.0 * high_samples / maxf(samples, 1),
 		100.0 * trench_samples / maxf(samples, 1), deep_max])
@@ -182,11 +248,13 @@ func _run() -> void:
 		mount_n += int(v)
 	lines.append("routen_ueber_graben_flanke=%d stellung_besetzt=%d anteil_an_waffe=%.1f%%" % [via_n, mount_n,
 		100.0 * mounted_samples / maxf(samples, 1)])
+	lines.append("stellung_beansprucht_proben=%d mitglied_haelt_nahe_stellung_proben=%d min_abstand=%.2f" % [emp_sel, emp_near_hold, emp_min])
 	for l in lines:
 		print("BAVBOTS ", l)
 	if BotGoals.use_map_hints:
 		await _emplacement_probe(m)
 	check(worst < STUCK_LIMIT * 2.0, "kein Bot > 40 s festgehängt (%.1f s)" % worst)
+	check(fell.is_empty(), "kein Bot durch den Boden gefallen (%d)" % fell.size())
 	check(deep_max < 60.0, "kein Bot > 60 s am Stück in Graben/Keller (%.1f s)" % deep_max)
 	var f := FileAccess.open(ProjectSettings.globalize_path("res://test_output/bavaria_bots%s.txt" % String(Game.cli.get("tag", ""))), FileAccess.WRITE)
 	if f:
@@ -221,6 +289,7 @@ func _emplacement_probe(m: Node) -> void:
 	var e = BotGoals.map_emplacement(b, spot, 5.0)
 	check(e == gun, "BotGoals.map_emplacement findet die Stellung")
 	b._emp = gun
+	b._emp_until = now() + BotBrain.EMP_APPROACH_S     # MP: beanspruchte Stellung mit Anlaufzeit
 	b.hold_pos = spot
 	b._hold_t = 30.0
 	b._hold_pick_t = now()

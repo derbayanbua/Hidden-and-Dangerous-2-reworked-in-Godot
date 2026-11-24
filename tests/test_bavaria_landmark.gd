@@ -163,11 +163,28 @@ func _run() -> void:
 		"Schneise führt von der Wiesenmitte Richtung Kirche (Keil außerhalb der Grenze)")
 	var low := get_tree().get_nodes_in_group("bavaria_vista_bush").size()
 	check(low >= 3, "Grenze in der Schneise weiter erkennbar: niedriges Randgebüsch (%d Büsche)" % low)
-	var smoke_top: Vector3 = lm.smoke.global_position + Vector3.UP * 90.0 * lm.fx_k
+	# Säule = senkrechte Strecke ab Rauchquelle bis zur Spitze (90 m × Maßstab): sichtbar, sobald ein Abschnitt frei ist.
+	var smoke_base: Vector3 = lm.smoke.global_position
+	var smoke_top: Vector3 = smoke_base + Vector3.UP * 90.0 * lm.fx_k
+	print("  Rauchsäule %s → %s (fx_k %.2f)" % [smoke_base, smoke_top, lm.fx_k])
+	# OG-Fensterplätze stehen im Rasterquader ihres eigenen Hauses (Dachhöhe als Box): ob der schmale Blick durch die
+	# Fensteröffnung den Turm oder die 8 m daneben stehende Säule trifft, entscheidet dort nur die Rasterung, nicht die
+	# Geometrie. Vergleich daher nur über Boden-/Zonenpositionen (Turm und Säule auf derselben Grundlage).
 	var seen_smoke := 0
+	var seen_tower_ground := 0
 	for e in eyes:
-		seen_smoke += int(_clear(e[1], smoke_top))
-	check(seen_smoke >= maxi(seen, 3), "Rauchsäule (90 m × Maßstab) von mindestens so vielen Positionen sichtbar wie der Turm (%d/%d)" % [seen_smoke, eyes.size()])
+		if String(e[0]).begins_with("OG-Fenster"):
+			continue
+		seen_tower_ground += int(_clear(e[1], tower))
+		var vis := false
+		for k in 9:
+			if _clear(e[1], smoke_top.lerp(smoke_base, k / 8.0)):
+				vis = true
+				break
+		seen_smoke += int(vis)
+		if not vis and _clear(e[1], tower):
+			print("  Turm frei, Rauch verdeckt ab %s %s" % [e[0], e[1]])
+	check(seen_smoke >= maxi(seen_tower_ground, 3), "Rauchsäule (90 m × Maßstab) von mindestens so vielen Boden-/Zonenpositionen sichtbar wie der Turm (%d, Turm %d)" % [seen_smoke, seen_tower_ground])
 	# --- Tag/Nacht ---
 	var dn = m.day_night
 	dn.set_hour(12.0, 0.0)

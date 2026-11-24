@@ -143,12 +143,12 @@ func _run() -> void:
 	var f := FileAccess.open(cfg, FileAccess.WRITE)
 	f.store_string("\n".join(PackedStringArray(["// Langlauf dedizierter Server (0.11.7)", "sessionname \"Soak-Test\"",
 		"style deathmatch", "mapname " + MAPS[0], "mapname " + MAPS[1], "port %d" % DPORT, "warmup 0", "pointlimit 0",
-		"roundlimit 1", "roundcount 1", "respawntime 3", "bots 2", "adminlogin chef", "adminpass geheim", "server"])) + "\n")
+		"roundlimit 1", "roundcount 1", "respawntime 3", "bots 4", "adminlogin chef", "adminpass geheim", "server"])) + "\n")
 	f.close()
 	var args := ["--headless", "--log-file", ProjectSettings.globalize_path("res://test_output/dedicated_soak_server_%s.log" % tag)]
 	if not OS.has_feature("template"):
 		args += ["--path", ProjectSettings.globalize_path("res://")]
-	args += ["--", "--dedicated=" + cfg, "--setup_gate=0", "--mem_log_s=%d" % mem_log_s,
+	args += ["--", "--dedicated=" + cfg, "--setup_gate=0", "--test_god=1", "--mem_log_s=%d" % mem_log_s,
 		"--mem_log_file=" + ProjectSettings.globalize_path("res://test_output/soak_memstat_server_%s.txt" % tag)]
 	var r := OS.execute_with_pipe(OS.get_executable_path(), args, false)
 	_stdio = r.get("stdio")
@@ -270,6 +270,13 @@ func _check_memory() -> void:
 			ok = ok and b <= limit
 			detail.append("%s %.1f→%.1f (≤%.1f)" % [String(ga[0].get("map", "")) if key != "static_mb" else "alle", a, b, limit])
 		check(ok, "Kein stetiger Anstieg: %s" % key, ", ".join(detail))
+	# 0.12.2: Leichen/Ablagestapel/Diagnoselisten begrenzt (Kills der Bots über die ganze Laufzeit)
+	var mx := func(k: String) -> int: return int(rows.map(func(r): return int(r.get(k, 0))).max())
+	var max_sold: int = mx.call("soldiers")
+	check(int(mx.call("corpses")) <= max_sold * 3 + 8, "Leichen begrenzt", "max %d bei %d Soldaten" % [int(mx.call("corpses")), max_sold])
+	check(int(mx.call("piles")) <= 96, "Ablagestapel begrenzt", "max %d" % int(mx.call("piles")))
+	check(int(mx.call("logs")) <= 6 * 200, "Diagnoselisten begrenzt", "max %d" % int(mx.call("logs")))
+	check(int(mx.call("decals")) <= 160, "Decals begrenzt", "max %d" % int(mx.call("decals")))
 	var gens: Array = rows.map(func(r): return int(r.get("gen", 0)))
 	check(int(gens.max()) <= 64, "Soldaten-Generationstabelle begrenzt", "max %d" % int(gens.max()))
 	var maps := {}
@@ -280,7 +287,7 @@ func _check_memory() -> void:
 
 func _write_outputs(minutes: float, joins: int) -> void:
 	var keys := ["t", "static_mb", "objects", "nodes", "orphans", "resources", "peers", "players", "soldiers", "gen",
-		"corpses", "decals", "auth_live", "auth_pending", "auth_drop", "chat", "feed", "rejects", "map", "round"]
+		"corpses", "decals", "auth_live", "auth_pending", "auth_drop", "chat", "feed", "rejects", "map", "round", "piles", "logs"]
 	var f := FileAccess.open("res://test_output/soak_memstat_%s.csv" % tag, FileAccess.WRITE)
 	if f:
 		f.store_line(",".join(keys))

@@ -45,6 +45,14 @@ var _bound_t := 0.0
 # --- Statistik (Tests/Debug) ---
 var bursts := 0
 var burst_log: Array = []        ## [Spielzeit, Schuss] je Feuerstoß
+const BOT_LOG_CAP := 128         ## 0.12.2: goal_log/burst_log im Langlauf begrenzt / capped for long-running servers
+
+
+func _trim_logs() -> void:
+	while goal_log.size() > BOT_LOG_CAP:
+		goal_log.pop_front()
+	while burst_log.size() > BOT_LOG_CAP:
+		burst_log.pop_front()
 var relocations := 0
 var grenades_thrown := 0
 var flank_count := 0
@@ -65,6 +73,9 @@ var _hold_owner := -99           ## Besitzer der Zielzone bei der letzten Wahl
 var _emp = null                  ## Waffenstellung aus Kartenhinweis (OrigEmplacement; Platz beansprucht/besetzt)
 var _emp_t := 0.0
 var _emp_cool := -100.0          ## nach dem Verlassen erst ab dieser Zeit wieder besetzen
+var _emp_until := -1.0           ## nur MP: beanspruchte Stellung bis zu dieser Zeit anlaufen (begrenzte Anlaufzeit)
+const EMP_APPROACH_S := 30.0     ## nur MP: höchstens so lange zur beanspruchten Stellung laufen
+const EMP_NEAR_ZONE := 25.0      ## nur MP: Mitglied wählt eine Stellung erst, wenn es so nah an der Zone ist (wie „angekommen“)
 var emp_mounts := 0              ## Statistik: Stellungen besetzt
 var _spot := Vector3.INF
 var _spot_t := 0.0
@@ -201,7 +212,7 @@ func _physics_process(delta: float) -> void:
 			_repath = 0.0
 			if _move_target.is_finite():
 				agent.target_position = _move_target
-			if is_leader() and state != State.COMBAT and goal.is_finite():
+			if is_leader() and state != State.COMBAT and goal.is_finite() and nav.replan_due():
 				# 0.11.7: mit Kartenwegpunkten/Versatz neu planen – bei Pendeln führt sonst dieselbe Route zurück an dieselbe Stelle
 				nav.plan(soldier, goal, Vector3.INF, true)
 			# Festgehangen: zurücksetzen und neue Route suchen (Gefecht: neue Deckung/Flanke, Mitglied: neuer Platz)
@@ -433,6 +444,9 @@ func _bounding_hold(delta: float, threat: Vector3) -> bool:
 
 func _member_tick(delta: float, lead: BotBrain) -> void:
 	_sync_goal(lead)
+	if _emp_keep():
+		_emp_approach()       # nur MP: zur beanspruchten Stellung laufen und besetzen
+		return
 	# Mitglied gilt als angekommen: selbst im Ziel oder der Führer hält dort und der Trupp ist heran (≤ 25 m)
 	if goal.is_finite() and (at_goal() or (lead._holding and soldier.global_position.distance_to(goal) < 25.0)):
 		_mark_reached()
@@ -465,11 +479,13 @@ func _sync_goal(lead: BotBrain) -> void:
 	goal_zone = lead.goal_zone
 	goal_obj = lead.goal_obj
 	_holding = false
-	hold_pos = Vector3.INF
+	if not _emp_keep():
+		hold_pos = Vector3.INF     # MP: beanspruchte freie Stellung bleibt (begrenzte Anlaufzeit)
 	_spot = Vector3.INF
 	if goal.is_finite():
 		goal_log.append({"kind": goal_kind, "zone": goal_zone, "obj": goal_obj, "set_t": now(), "reach_t": -1.0,
 			"dist": soldier.global_position.distance_to(goal)})
+		_trim_logs()
 
 
 ## Formationsplatz: Keil mit 7 m Seitenabstand hinter dem Führer (Laufrichtung); wo das nicht passt (Gasse, Gebäude,
@@ -588,10 +604,40 @@ func _set_goal(g: Dictionary) -> void:
 	if changed:
 		goal_log.append({"kind": goal_kind, "zone": goal_zone, "obj": goal_obj, "set_t": now(), "reach_t": -1.0,
 			"dist": soldier.global_position.distance_to(goal)})
+		_trim_logs()
 		_holding = false
-		hold_pos = Vector3.INF
+		if _emp_keep():
+			pass        # nur MP: beanspruchte, freie Stellung bleibt Halteplatz (Anlaufzeit begrenzt)
+		else:
+			hold_pos = Vector3.INF
 		_spot = Vector3.INF
 		nav.clear()
+
+
+## Nur MP: zur beanspruchten Stellung laufen, an der Stelle besetzen.
+func _emp_approach() -> void:
+	if distance_to(hold_pos) < 2.0:
+		stop_moving()
+		_emp.mount(soldier)
+		if soldier.mounted == _emp:
+			_emp_t = 0.0
+			emp_mounts += 1
+		else:
+			_emp = null
+			_emp_cool = now() + 30.0
+		return
+	soldier.stance_request = Soldier.Stance.STAND
+	move_to(hold_pos, Soldier.MoveMode.JOG)
+
+
+## Nur MP: beanspruchte Waffenstellung weiter anlaufen, solange sie frei ist und die Anlaufzeit läuft.
+## Im Einzelspieler immer false (Verhalten wie bisher).
+func _emp_keep() -> bool:
+	if not Net.is_online or _emp == null or not is_instance_valid(_emp) or soldier.mounted != null:
+		return false
+	if now() > _emp_until or not _emp.can_ai_mount(soldier):
+		return false
+	return hold_pos.is_finite()
 
 
 # --- am Ziel: halten, Stellung, Aufgabe ------------------------------------------------------------
@@ -652,7 +698,14 @@ func _hold_in_area(delta: float) -> void:
 		soldier.look_yaw += delta * 0.9
 		_goal_t = minf(_goal_t, 3.0)       # kurz umsehen, dann weitersuchen
 		return
-	_hold_t -= delta
+	var mp_emp := _emp_keep()
+	if Net.is_online and not mp_emp and _emp != null and soldier.mounted == null:
+		# MP: Anlaufzeit abgelaufen oder Stellung belegt → Anspruch aufgeben, neu wählen
+		_emp = null
+		_emp_cool = now() + 30.0
+		_hold_t = 0.0
+	if not mp_emp:
+		_hold_t -= delta       # MP: Haltezeit läuft erst nach der Ankunft an der Stellung (dort wird besetzt)
 	# Ereignisse (nur auf Karten mit Hinweisen): neue Bedrohungsrichtung oder Besitzwechsel der Zielzone → neu wählen
 	# ohne Kartenhinweise wie vor bot_hints: Bedrohung erst bei der Wahl ermitteln (nicht jedes Physikbild)
 	var hints := BotGoals.map_has_hints()
@@ -661,7 +714,7 @@ func _hold_in_area(delta: float) -> void:
 	if hints and now() - _hold_pick_t > 4.0 and hold_pos.is_finite() and _emp == null \
 			and ((gthr.is_finite() and (not _hold_threat.is_finite() or BotNav.flat(gthr, _hold_threat) > 15.0)) or zown != _hold_owner):
 		_hold_t = 0.0
-	if not hold_pos.is_finite() or _hold_t <= 0.0 or (rmin > 3.0 and BotNav.flat(hold_pos, center) < rmin - 0.5):
+	if not mp_emp and (not hold_pos.is_finite() or _hold_t <= 0.0 or (rmin > 3.0 and BotNav.flat(hold_pos, center) < rmin - 0.5)):
 		_hold_t = randf_range(20.0, 35.0)
 		_hold_pick_t = now()
 		if not hints:
@@ -678,11 +731,14 @@ func _hold_in_area(delta: float) -> void:
 			# derselbe Platz war eben physisch nicht erreichbar (Festhängen → _give_up): hier halten statt erneut anlaufen
 			h = BotNav.closest(soldier, soldier.global_position)
 		_emp = null
-		if not is_leader() and now() > _emp_cool:
+		# MP: nur wählen, wenn das Mitglied selbst in Zonennähe ist (sonst läuft es quer über die Karte)
+		var near_ok := not Net.is_online or BotNav.flat(soldier.global_position, center) <= rmax + EMP_NEAR_ZONE
+		if not is_leader() and now() > _emp_cool and near_ok:
 			# Mitglieder besetzen eine freie Waffenstellung der Karte (Flak/MG) nahe dem Ziel
 			var e = BotGoals.map_emplacement(self, center, rmax + 10.0)
 			if e:
 				_emp = e
+				_emp_until = now() + EMP_APPROACH_S
 				h = BotNav.closest(soldier, e.gunner_spot())
 		hold_pos = h
 		BotSquad.claim(self, hold_pos)
@@ -1104,6 +1160,7 @@ func _handle_bursts(w: Weapon, can_shoot: bool, delta: float, dist: float) -> vo
 		_burst_start_mag = w.in_mag
 		bursts += 1
 		burst_log.append([now(), 0])
+		_trim_logs()
 		leader().suppress_until = now() + 3.0
 	soldier.trigger = true
 	var fired := _burst_start_mag - w.in_mag

@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.12.2 (24.11.2026)
+
+**DE**
+- **Mehrspieler-Bots:** bessere Wegfindung und Zielwahl; KI-Soldaten besetzen im Mehrspieler Waffenstellungen nahe ihrer
+  Zone (Einzelspieler unverändert). Spieler bekommen beim Wechsel des Spielstils (z. B. Deathmatch → Besetzung) wieder eine
+  passende Teamseite.
+- **Türen:** Türflügel liegen wieder in ihren Türöffnungen statt verstreut in der Karte und öffnen vom Benutzer weg.
+  Schalter, Türen und Waffenstellungen lassen sich nicht mehr durch Decken und Wände benutzen; der Server prüft das ebenfalls.
+  ARCTIC2-Türen lassen sich wieder schließen.
+- **Ragdoll, Laufnetz, Server:** stabilere Leichenphysik, weitere gespiegelte Kollisionsböden im Laufnetz, Stabilität des
+  dedizierten Servers im Dauerlauf verbessert.
+- **1. Person:** Beine werden beim steilen Blick nach unten ausgeblendet.
+- **Neue Testkarte Castle** (Deathmatch, Team-DM, Eroberung mit Frontlinie): Burganlage auf einem Höhenrücken, eigene
+  Texturen, läuft ohne Originaldaten.
+- **Eigene Karten:** Karten lassen sich als eigenes Paket erstellen und laden (Vorlage und Exportskript in `tools/`).
+- **Bavaria:** Kartenbäume überarbeitet – Kronen aus räumlichen Laubbüscheln statt flacher Karten (auch am Kletterbaum),
+  gedeckte Laub- und Rindenfarben, passendere Artenmischung, weiche Detailstufen; doppelt gezeichnete Laubkarten entfernt.
+  Stollensohle unter den Treppen und an den Stollenansätzen massiv (kein Durchfallen). Wetter, neue Materialien, Panorama
+  Süd, hellere Nacht; Hütte mit MG42: Tür blockiert den Weg nicht mehr.
+- **Werkzeugmenü:** Export-Ziel `orig_cache` innerhalb der Installation erlaubt.
+- **Tests:** angepasst und stabilisiert (FPV-Beine, Kartenreihenfolge, Tag/Nacht-Grenzen, AFRICA1-Finale-Zeitlimit).
+
+**EN**
+- **Multiplayer bots:** better pathing and goal choice; in multiplayer, AI soldiers man weapon emplacements near their zone
+  (single player is unchanged). Players get a matching team side again when the game style changes (e.g. deathmatch →
+  occupation).
+- **Doors:** door leaves sit in their doorways again instead of lying scattered across the map and open away from the user.
+  Switches, doors and emplacements can no longer be used through ceilings or walls; the server checks this as well.
+  ARCTIC2 doors can be closed again.
+- **Ragdoll, nav mesh, server:** more stable corpse physics, more flipped collision floors in the nav mesh, better dedicated
+  server stability in long runs.
+- **First person:** legs are hidden when looking steeply down.
+- **New test map Castle** (deathmatch, team DM, occupation with front line): castle on a ridge, own textures, runs without
+  original data.
+- **Custom maps:** maps can be built and loaded as their own package (template and export script in `tools/`).
+- **Bavaria:** reworked map trees – crowns built from volumetric leaf clusters instead of flat cards (including the climbing
+  tree), muted leaf and bark colours, better species mix, smooth LOD; removed duplicate always-drawn leaf cards. Solid
+  tunnel floor below the stairs and at the tunnel mouths (no falling through). Weather, new materials, south panorama,
+  brighter night; MG42 hut: the door no longer blocks the way.
+- **Tool menu:** export target `orig_cache` inside the installation is allowed.
+- **Tests:** adjusted and stabilised (FPV legs, map order, day/night limits, AFRICA1 finale time limit).
+
 
 
 ## 0.12.1 (22.11.2026)

@@ -79,15 +79,32 @@ func build(m) -> void:
 				raw.append({"pos": house.to_global(lp), "kind": "house", "stance": CROUCH})
 	var pd = m.get("scene_details")
 	if pd:
-		for key in ["tree_stand", "antenna_stand"]:   # kein Dachsteg (11/2026); Antennenplattform per Steigleiter = erhöhter Posten
+		# Baumstand und Antennenplattform liegen über Netzflächen (scene_details._nav_deck) im Navmesh, Leiter = NavigationLink3D;
+		# werden daher wie alle Punkte ans Netz geheftet (vorher: Baumstand verworfen, Antenne ungeheftet neben dem Netz).
+		for key in ["tree_stand", "antenna_stand"]:   # kein Dachsteg (11/2026)
 			var v = pd.get(key)
 			if v is Vector3 and v != Vector3.ZERO:
-				raw.append({"pos": v, "kind": "high", "stance": CROUCH, "high": true, "raw": key == "antenna_stand"})   # Plattform liegt nicht im Navmesh (Leiter)
+				raw.append({"pos": v, "kind": "high", "stance": CROUCH, "high": true})
 	# Waffenstellungen der Karte (Flak auf der Wiese, MG42 im Holzhaus)
 	for holder in [m.get("field_emplacement"), m.get("woodland_emplacement")]:
 		if holder and is_instance_valid(holder.get("gun")):
 			var gun = holder.gun
 			raw.append({"pos": gun.gunner_spot(), "kind": "emplacement", "stance": STAND, "emplacement": gun, "raw": true})
+	# Stollen-Ausbau 2: MG42 im Nest (Bedienplatz) und Deckung hinter der Brustwehr, Luke/Einsturz als Deckungsplatz am Rand
+	var tun = m.get("tunnels")
+	if tun:
+		if is_instance_valid(tun.get("nest_gun")):
+			raw.append({"pos": tun.nest_gun.gunner_spot(), "kind": "emplacement", "stance": STAND, "emplacement": tun.nest_gun, "raw": true})
+		for id in tun.get("extra"):
+			var x: Dictionary = tun.extra[id]
+			var u: Vector3 = x.u3
+			var side := Vector3(-u.z, 0, u.x)
+			var head: Vector3 = x.head
+			if String(x.kind) == "nest":
+				for t in [-0.9, 0.9]:
+					raw.append({"pos": head - u * 1.3 + side * t, "kind": "cover", "stance": CROUCH})
+			else:
+				raw.append({"pos": head - u * 0.9 + side * 1.4, "kind": "cover", "stance": CROUCH})
 	# ans Netz heften
 	for h in raw:
 		if h.get("raw", false) or not on_nav:
@@ -95,10 +112,13 @@ func build(m) -> void:
 			continue
 		var p: Vector3 = h.pos
 		var q := NavigationServer3D.map_get_closest_point(nav_map, p)
-		if Vector2(q.x - p.x, q.z - p.z).length() > 1.2 or absf(q.y - p.y) > 1.5:
+		if Vector2(q.x - p.x, q.z - p.z).length() > 1.2 or absf(q.y - p.y) > (0.6 if h.get("high", false) else 1.5):
 			dropped += 1
 			continue
-		h.pos = q
+		# Erhöhte Posten: Netz nur als Erreichbarkeitsnachweis. Die Netzfläche der schmalen Plattformen liegt durch
+		# Zellhöhe/Agentenradius bis 0,4 m höher und 0,3 m seitlich (Antenne: Abstand 0,51 m) → echter Standplatz bleibt.
+		if not h.get("high", false):
+			h.pos = q
 		hints.append(h)
 	# Gartenflanken: beidseits der Mauern je ein Weg (Anfang → Ende), 1,6 m Abstand
 	for pair in GARDEN_WALLS:
@@ -120,12 +140,21 @@ func build(m) -> void:
 		routes = ok
 
 
+## Waffenstellungen gelten in einem um EMP_REACH größeren Umkreis: Die KI sucht sie um den Zonenmittelpunkt mit
+## Zonenradius × 0,8 + 10 m (BotBrain._hold_in_area); die Zonen dieser Karte sind klein (3,8–4,6 m), die Flak liegt
+## 15,5 m neben Zone C → ohne Zuschlag fand kein Bot je eine Stellung. Andere Abfragen filtern selbst (in_zone, Abstand).
+const EMP_REACH := 20.0
+
+
 func near(center: Vector3, radius: float) -> Array:
 	var out: Array = []
 	var r2 := radius * radius
+	var reach := EMP_REACH if Net.is_online else 0.0      # Zuschlag nur im Mehrspieler (Einzelspieler unverändert)
+	var re2 := (radius + reach) * (radius + reach)
 	for h in hints:
 		var p: Vector3 = h.pos
-		if Vector2(p.x - center.x, p.z - center.z).length_squared() <= r2:
+		var d2 := Vector2(p.x - center.x, p.z - center.z).length_squared()
+		if d2 <= r2 or (h.has("emplacement") and d2 <= re2):
 			out.append(h)
 	return out
 
