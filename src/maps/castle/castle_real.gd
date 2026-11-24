@@ -13,12 +13,14 @@ const KitScript := preload("res://src/maps/castle/castle_kit.gd")
 const LayoutScript := preload("res://src/maps/castle/castle_layout.gd")
 const LibraryModels := preload("res://src/maps/bavaria/library_models.gd")
 const DressingScript := preload("res://src/maps/castle/castle_dressing.gd")
+const RoadScript := preload("res://src/maps/castle/castle_road.gd")
 const COURT_SECTIONS := ["A", "B", "C", "D", "E", "F"]
 
 var terrain = TerrainScript.new()
 var buildings = BuildingsScript.new()
 var kit = KitScript.new()
 var dressing = DressingScript.new()
+var road = RoadScript.new()
 var features := {}
 var boundary := PackedVector2Array()
 var sections := {}                 # Code → PackedVector2Array
@@ -209,9 +211,15 @@ func build(m: Node) -> Dictionary:
 				kit.gate_axes.append(Vector3(dv.x, 0, dv.y))
 	var t1 := Time.get_ticks_msec()
 	_lb_mats = m.lb._mats
+	_road_ribbons = _lb_mats.has("c_cobble") and String(Game.cli.get("castle_road", "1")) != "0"
 	terrain.build(m.static_root, m.dynamic_root, m.lb, play_rect, _ground_material)
 	var t2 := Time.get_ticks_msec()
 	_build_bridges(m)
+	if _road_ribbons:
+		road.build(self, m)
+		print("CASTLE_ROAD: Wegbänder %.0f m in %d Stücken (Kieselpflaster %.0f m, Sandweg %.0f m), Abweichung vom Datenweg max. %.2f m"
+			% [road.stats.length_m, road.stats.runs, float(road.stats.get("pebble_m", 0.0)), float(road.stats.get("sand_m", 0.0)),
+			road.stats.max_dev])
 	_build_towers(m)
 	_build_enceinte()
 	_build_cross_walls()
@@ -235,6 +243,7 @@ func build(m: Node) -> Dictionary:
 
 
 var _lb_mats := {}
+var _road_ribbons := false
 
 
 ## Grabensohle: unter einer Brücke (≤ 14 m seitlich der Brückenachse) und > 2 m unter dem Deck
@@ -265,12 +274,18 @@ func _ground_material(x: float, z: float) -> String:
 	if dh > 0.6:
 		return "c_slope"
 	# Referenzansichten: Fahrweg durch alle Höfe gepflastert (Katzenkopf), daneben Kiesstreifen; Hauptburghof ganz gepflastert
+	if section_of(p) == "F":
+		# 3D-Rundgang: Innerer Hof ganz mit Flusskieseln gepflastert
+		for k in ["c_pebble", "c_cobble", "c_paving"]:
+			if _lb_mats.has(k):
+				return k
+	# Wegbänder (castle_road.gd) liegen mit runden Rändern über dem Gelände; darunter Gras. Ohne Bänder: Material je Zelle
+	if _road_ribbons:
+		return "c_grass"
 	var cob := "c_cobble" if _lb_mats.has("c_cobble") else "c_earth"
 	var pd: float = path_info(p)[0]
 	if pd < 2.4:
 		return cob
-	if section_of(p) == "F":
-		return "c_cobble" if _lb_mats.has("c_cobble") else "c_paving"
 	if pd < 3.3 and _lb_mats.has("c_gravel"):
 		return "c_gravel"
 	return "c_grass"

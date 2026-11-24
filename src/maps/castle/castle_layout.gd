@@ -118,6 +118,11 @@ const KIT_MATERIALS := [
 	# Abgleich mit Referenzansichten (0.12.2): Hauptweg und Hof der Hauptburg mit Katzenkopfpflaster, Gehstreifen Kies
 	["c_cobble", "katzenkopfpflaster", 0.9, Color(0.92, 0.92, 0.9)],
 	["c_gravel", "erdweg_kies", 0.35, Color(0.95, 0.93, 0.9)],
+	# Abgleich 3D-Rundgang (0.12.2): Flusskieselpflaster (innere Höfe) und heller Sandweg (äußere Höfe), eigene prozedurale
+	# Texturen aus tools/gen_castle_ground.py (Kachel 1,2 m bzw. 2,0 m)
+	["c_pebble", "flusskiesel_pflaster", 0.83, Color.WHITE],
+	["c_sand", "sandweg_hell", 0.5, Color(0.88, 0.86, 0.82)],
+	["c_hedge", "schnitthecke", 1.0, Color.WHITE],
 ]
 
 

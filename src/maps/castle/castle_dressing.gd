@@ -147,8 +147,13 @@ func _hedges(r, m: Node) -> void:
 	# (glatter grüner Körper) nur noch als Rückfall ohne Bibliotheksmodell
 	# Sommerstrauch mit Laubkarten (Alpha-Maske, wie der dichte Randsaum der Testkarte); der Bibliotheks-Heckenstrauch ist
 	# nur facettierte Vertexfarbe (Kontrollbild hof_c) und bleibt Rückfall
+	# 3D-Rundgang (3./4. Vorhof): dicht geschnittene, kastenförmige Hecken ~1,15 m hoch, ~1,1 m breit → eigene Laubtextur
+	# (c_hedge, tools/gen_castle_ground.py) auf abgerundetem Heckenkörper; lose Sträucher nur ohne diese Textur
+	var hm: StandardMaterial3D = r._lb_mats.get("c_hedge") as StandardMaterial3D
+	var cut: bool = hm != null and hm.albedo_texture != null
+	var vis := MeshBatch.new()
 	var tmpl: Node3D = null
-	if LibraryModels.enabled():
+	if not cut and LibraryModels.enabled():
 		tmpl = LibraryModels.load_model("strauch_sommer_2")
 		if tmpl == null:
 			tmpl = LibraryModels.load_model(LibraryModels.HEDGE.trim_prefix("lib:"))
@@ -167,7 +172,7 @@ func _hedges(r, m: Node) -> void:
 		if box.size.x < 0.05 or box.size.y < 0.05 or box.size.z < 0.05:
 			tmpl.free()
 			tmpl = null
-	if tmpl == null and r.kit.model_aabb("hecke_sommer_4m").size.is_zero_approx():
+	if not cut and tmpl == null and r.kit.model_aabb("hecke_sommer_4m").size.is_zero_approx():
 		return
 	var holder := Node3D.new()
 	holder.name = "CastleHedges"
@@ -193,7 +198,11 @@ func _hedges(r, m: Node) -> void:
 					run = 0
 					continue
 				var y: float = r.terrain.height(q.x, q.y)
-				if tmpl:
+				if cut:
+					_cut_hedge(r, vis, q, d, 1.05 + 0.15 * _h(q, 5))
+					r.kit.col.box(Transform3D(Basis(Vector3.UP, -d.angle()), Vector3(q.x, y + 0.6, q.y)), Vector3(4.0, 1.2, 1.3),
+						"c_wood", false, true)
+				elif tmpl:
 					# zwei Sträucher je 4-m-Stück, Längsachse (lokal z) entlang des Wegs, Höhe 1,2–1,5 m
 					var yaw := atan2(d.x, d.y)
 					for part in 2:
@@ -214,6 +223,44 @@ func _hedges(r, m: Node) -> void:
 				stats.hedges += 1
 	if tmpl:
 		tmpl.free()
+	if cut and vis.tri_count > 0:
+		vis.commit(holder, "CutHedges", m.lb, false, true)
+
+
+## Geschnittene Hecke: Querschnitt mit abgerundeten Oberkanten, 4 m lang, entlang d; Fuß folgt dem Gelände (je Ende),
+## nur Darstellung (Kollision = Kiste in kit.col). Enden leicht eingezogen, damit Lücken nicht scharfkantig wirken.
+func _cut_hedge(r, mb: MeshBatch, q: Vector2, d: Vector2, h: float) -> void:
+	var w := 0.55
+	var prof := [Vector2(w, -0.08), Vector2(w, h - 0.2), Vector2(w - 0.07, h - 0.06), Vector2(w - 0.2, h),
+		Vector2(-w + 0.2, h), Vector2(-w + 0.07, h - 0.06), Vector2(-w, h - 0.2), Vector2(-w, -0.08)]
+	var side := d.orthogonal()
+	var ends: Array = []
+	for t in [-1.95, 1.95]:
+		var c: Vector2 = q + d * t
+		var y: float = r.terrain.height(c.x, c.y)
+		var ring: Array = []
+		for pp in prof:
+			var s := (pp as Vector2)
+			var pull := 0.97 if s.y > h - 0.25 else 1.0
+			var o: Vector2 = c + side * s.x * pull
+			ring.append(Vector3(o.x, y + s.y, o.y))
+		ends.append(ring)
+	for i in prof.size() - 1:
+		var a: Vector3 = ends[0][i]
+		var b: Vector3 = ends[0][i + 1]
+		var c3: Vector3 = ends[1][i + 1]
+		var e: Vector3 = ends[1][i]
+		var mid: Vector2 = ((prof[i] as Vector2) + (prof[i + 1] as Vector2)) * 0.5
+		var n2 := Vector2(mid.x, mid.y - h * 0.5).normalized()
+		var n := Vector3(side.x * n2.x, n2.y, side.y * n2.x).normalized()
+		mb.quad(a, b, c3, e, n, "c_hedge", true, false)
+	for k in 2:
+		var ring: Array = ends[k]
+		var cap := PackedVector3Array()
+		for v in ring:
+			cap.append(v)
+		var dn := Vector3(d.x, 0, d.y) * (1.0 if k == 1 else -1.0)
+		mb.poly(cap, dn, "c_hedge", true, false)
 
 
 func _lanterns(r) -> void:

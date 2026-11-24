@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.12.4 (24.11.2026)
+
+**DE**
+- **Testkarte Castle – Wege:** Die Wege liegen als eigene, geglättete Bänder auf dem Gelände: gerade Strecken, gerundete
+  Kurven, eine Reihe Randsteine und ein schmaler Sandsaum, der weich ins Gras ausläuft (vorher treppige Ränder durch
+  Belag je 2-m-Geländezelle). Innere Höfe mit Flusskieselpflaster, äußere Höfe mit hellem Sandweg. Kollision und
+  Laufnetz bleiben unverändert.
+- **Castle – Gebäude und Bewuchs:** Hauptburg mit grobem Bruchstein und kleinen Fenstern statt Palastfassade; Hecken
+  als dicht geschnittene Kastenhecken.
+- **Neue eigene Texturen:** Flusskieselpflaster, heller Sandweg und Schnitthecke, prozedural erzeugt mit
+  `tools/gen_castle_ground.py` (keine Fremddaten).
+
+**EN**
+- **Test map Castle – paths:** paths are now separate smoothed strips on the terrain: straight runs, rounded bends, a row
+  of kerb stones and a narrow sand fringe that fades softly into the grass (previously jagged edges from one surface per
+  2 m terrain cell). Inner courts with river-pebble paving, outer courts with a light sand path. Collision and walk mesh
+  are unchanged.
+- **Castle – buildings and plants:** main castle with rough rubble stone and small windows instead of a palace facade;
+  hedges as densely trimmed box hedges.
+- **New own textures:** river-pebble paving, light sand path and trimmed hedge, generated procedurally with
+  `tools/gen_castle_ground.py` (no third-party data).
+
 ## 0.12.3 (24.11.2026)
 
 **DE**

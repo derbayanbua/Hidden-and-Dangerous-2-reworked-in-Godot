@@ -289,7 +289,10 @@ func build(m: Node, list: Array, terrain, gate_points: Array, dir_fn: Callable, 
 						mat = LayoutScript.ROOF_MATS[hv % 4] if _has("r_bib1") else (["c_roof", "c_roof2"][hv % 2])
 					elif _has("f_palas"):
 						var pk: String = sd[2] if sd.size() > 2 else "building"
-						mat = "f_tuff" if pk in ["tower", "gate", "wall"] else ("f_gothic" if sd.size() > 3 and sd[3] else "f_palas")
+						# Abgleich 3D-Rundgang (Innerer Hof): Hauptburg = grober Bruch-/Tuffstein mit kleinen Fenstern, keine
+						# regelmäßigen Palastfenster → Tuffwand mit Kleinfenstern (Rückfall Palasfenster)
+						var plain := "f_tuffwin" if _has("f_tuffwin") else "f_palas"
+						mat = "f_tuff" if pk in ["tower", "gate", "wall"] else ("f_gothic" if sd.size() > 3 and sd[3] else plain)
 					else:
 						mat = ["c_plaster", "c_plaster2", "c_stone"][hv % 3]
 					split_parts[String(b.id)][part] = int(split_parts[String(b.id)].get(part, 0)) + 1
