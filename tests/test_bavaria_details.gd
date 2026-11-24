@@ -32,7 +32,7 @@ func _run() -> void:
 	m.actors_root.add_child(s)
 	var space := m.get_world_3d().direct_space_state
 	var ladders := get_tree().get_nodes_in_group("bavaria_scene_ladders")
-	check(ladders.size() == 4,"Leiter-Endpunkte: Baum (2) und Antennen-Steigleiter (2), kein Dachsteg")
+	check(ladders.size() == 6,"Leiter-Endpunkte: Baum (2), Antennen-Steigleiter (2) und Dachluke (2), kein Dachsteg")
 	var pdx = m.get("scene_details")
 	var astand: Vector3 = pdx.antenna_stand
 	check(astand != Vector3.ZERO and m.inside_map(astand) and astand.y > 3.0, "Antennenplattform als oberer Standplatz (%.2f m)" % astand.y)

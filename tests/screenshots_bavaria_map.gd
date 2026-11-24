@@ -87,6 +87,15 @@ func _run() -> void:
 			var inward := -mid.normalized()
 			var eye := Vector3(mid.x,1.7,mid.y)+Vector3(inward.x,0,inward.y)*16.0
 			shots.append(["border_"+str(edge),eye,Vector3(mid.x,2.0,mid.y),65.0])
+	if Game.cli.has("hatch_views"):
+		# Dachluke Antennenhaus: feste Hauspunkte, damit Vorher (--roof_hatch=0) und Nachher vergleichbar sind
+		shots.clear()
+		var hh: Node3D = m.static_root.get_node("haus_18_shed")
+		var tag := String(Game.cli.get("tag", "nachher"))
+		shots.append(["hatch_" + tag + "_innen", hh.to_global(Vector3(-1.6, 4.8, -1.4)), hh.to_global(Vector3(1.0, 5.6, 1.3)), 75.0])
+		shots.append(["hatch_" + tag + "_innen_oben", hh.to_global(Vector3(0.2, 4.6, -0.6)), hh.to_global(Vector3(1.0, 7.4, 1.3)), 80.0])
+		shots.append(["hatch_" + tag + "_dach_aussen", hh.to_global(Vector3(4.5, 11.5, 8.0)), hh.to_global(Vector3(1.0, 7.4, 0.8)), 60.0])
+		shots.append(["hatch_" + tag + "_dach_stand", hh.to_global(Vector3(1.0, 9.4, -0.2)), hh.to_global(Vector3(6.4, 8.0, 1.2)), 75.0])
 	if Game.cli.has("building_audit"):
 		shots.clear()
 		for building in get_tree().get_nodes_in_group("bavaria_buildings"):

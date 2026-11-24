@@ -81,7 +81,7 @@ func build(m) -> void:
 	if pd:
 		# Baumstand und Antennenplattform liegen über Netzflächen (scene_details._nav_deck) im Navmesh, Leiter = NavigationLink3D;
 		# werden daher wie alle Punkte ans Netz geheftet (vorher: Baumstand verworfen, Antenne ungeheftet neben dem Netz).
-		for key in ["tree_stand", "antenna_stand"]:   # kein Dachsteg (11/2026)
+		for key in ["tree_stand", "antenna_stand", "roof_hatch_stand"]:   # kein Dachsteg; Podest an der Dachluke (11/2026)
 			var v = pd.get(key)
 			if v is Vector3 and v != Vector3.ZERO:
 				raw.append({"pos": v, "kind": "high", "stance": CROUCH, "high": true})

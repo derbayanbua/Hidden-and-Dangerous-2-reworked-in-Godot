@@ -52,6 +52,8 @@ void vertex() {
 	float r2 = hash(origin.zx + 3.1);
 	v_vary = vec3(1.0 + (r1 - 0.5) * color_vary, 1.0 + (r2 - 0.5) * color_vary * 0.6, 1.0 + (r1 - r2) * color_vary * 0.5);
 	v_card_n = (MODELVIEW_MATRIX * vec4(NORMAL, 0.0)).xyz;
+	// Kronenhülle (eztree.clump_mesh): Vertexfarbe = Tiefe/Streuung je Karte; Meshes ohne Farbe liefern Weiß
+	v_vary *= COLOR.rgb;
 	if (is_leaf) {
 		float f = sin(TIME * 6.0 + VERTEX.x * 3.1 + VERTEX.z * 2.7 + phase * 5.0);
 		VERTEX += NORMAL * f * flutter * h * tree_height * 0.05;

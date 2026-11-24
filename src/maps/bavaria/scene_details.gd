@@ -150,6 +150,87 @@ func _tower() -> void:
 	roof_stand = Vector3.ZERO
 	_antenna_platform(support, local_base)
 	support.add_to_group("bavaria_towers")
+	_roof_hatch(house)
+
+## 11/2026: Dachluke im Antennenhaus. Öffnung in der Dachplatte (templates._roof_hatch_cut), darunter im OG-Flur eine
+## senkrechte Holzleiter, oben ein waagrechtes Ausstiegspodest über dem First mit Geländer (Öffnung nur über der Luke).
+## Klettern über SceneLadder (OrigLadder/start_path_climb, MP-Abgleich wie Baum/Antenne): Weg führt senkrecht durch die
+## Luke und dann waagrecht aufs Podest. Netzfläche liegt mit dem Podest unter static_root (Haus) → Leiter-Link für Bots.
+var roof_hatch_stand := Vector3.ZERO
+
+func _roof_hatch(house: Node3D) -> void:
+	if not house.has_meta("roof_hatch"):
+		return
+	var info: Dictionary = house.get_meta("roof_hatch")
+	var r: Rect2 = info.rect
+	var slope: float = info.slope
+	var eaves: float = info.eaves
+	var half_d: float = info.half_d
+	var og := 3.18
+	var lx := r.get_center().x
+	var ridge_top := eaves + tan(slope) * half_d - 0.12 + 0.18
+	var deck_y := ridge_top + 0.12
+	var dx0 := r.position.x - 0.25
+	var dx1 := r.end.x + 0.25
+	var dz0 := -0.65
+	var dz1 := r.position.y - 0.03
+	var root := Node3D.new()
+	root.name = "Dachluke"
+	house.add_child(root)
+	root.add_to_group("bavaria_roof_hatch")
+	# Podest: Bohlenbelag mit Kollision, Unterzüge und Stützen auf die Dachfläche
+	lb.box(Vector3((dx0 + dx1) * 0.5, deck_y - 0.08, (dz0 + dz1) * 0.5), Vector3(dx1 - dx0, 0.08, dz1 - dz0), "wood", 0, true, root)
+	for x in [dx0 + 0.06, dx1 - 0.06]:
+		lb.box(Vector3(x, deck_y - 0.20, (dz0 + dz1) * 0.5), Vector3(0.10, 0.12, dz1 - dz0), "darkwood", 0, false, root)
+		for z in [dz0 + 0.06, dz1 - 0.06]:
+			var roof_y := eaves - 0.1 + tan(slope) * (half_d - absf(z)) + 0.15 / cos(slope)
+			lb.box(Vector3(x, roof_y - 0.05, z), Vector3(0.09, deck_y - 0.2 - roof_y + 0.05, 0.09), "darkwood", 0, false, root)
+	# Geländer 1,0 m (Kollision als schmale Platten, Sicht über Pfosten/Handlauf); zur Luke hin nur die Öffnung frei
+	var rails := [[Vector3(dx0, 0, dz0), Vector3(dx1, 0, dz0)], [Vector3(dx0, 0, dz0), Vector3(dx0, 0, dz1)],
+		[Vector3(dx1, 0, dz0), Vector3(dx1, 0, dz1)], [Vector3(dx0, 0, dz1), Vector3(r.position.x, 0, dz1)],
+		[Vector3(r.end.x, 0, dz1), Vector3(dx1, 0, dz1)]]
+	for seg in rails:
+		var a: Vector3 = seg[0] + Vector3.UP * deck_y
+		var b: Vector3 = seg[1] + Vector3.UP * deck_y
+		var len := a.distance_to(b)
+		var along_x := absf(b.x - a.x) > absf(b.z - a.z)
+		var body := StaticBody3D.new()
+		body.name = "DachlukeGelaender"
+		var cs := CollisionShape3D.new()
+		var shape := BoxShape3D.new()
+		shape.size = Vector3(len if along_x else 0.05, 1.0, 0.05 if along_x else len)
+		cs.shape = shape
+		body.add_child(cs)
+		root.add_child(body)
+		body.position = (a + b) * 0.5 + Vector3.UP * 0.5
+		for k in [0.0, 1.0]:
+			_beam(root, a.lerp(b, k), a.lerp(b, k) + Vector3.UP * 1.0, 0.05, "darkwood")
+		_beam(root, a + Vector3.UP * 1.0, b + Vector3.UP * 1.0, 0.05, "darkwood")
+		_beam(root, a + Vector3.UP * 0.5, b + Vector3.UP * 0.5, 0.035, "darkwood")
+	# Senkrechte Leiter im OG an der traufseitigen Lukenkante, Holme bis 0,9 m über die Dachfläche (Griff beim Ausstieg)
+	var lz := r.end.y - 0.30
+	var roof_at_ladder := eaves - 0.1 + tan(slope) * (half_d - lz) + 0.15 / cos(slope)
+	for x in [lx - 0.25, lx + 0.25]:
+		_beam(root, Vector3(x, og, lz), Vector3(x, roof_at_ladder + 0.9, lz), 0.05, "darkwood")
+	var rung_y := og + 0.28
+	while rung_y < roof_at_ladder - 0.05:
+		_beam(root, Vector3(lx - 0.25, rung_y, lz), Vector3(lx + 0.25, rung_y, lz), 0.04, "darkwood")
+		rung_y += 0.28
+	var bottom := house.to_global(Vector3(lx, og + 0.01, r.position.y + 0.40))
+	var top := house.to_global(Vector3(lx, deck_y + 0.02, (dz0 + dz1) * 0.5))
+	roof_hatch_stand = top
+	for upper in [false, true]:
+		var ladder := SceneLadder.new()
+		ladder.name = "dachluke_leiter" + ("_oben" if upper else "_unten")
+		ladder.persistent_id = "bavaria_" + ladder.name
+		ladder.bottom = bottom
+		ladder.top = top
+		ladder.at_top = upper
+		ladder.prompt = "Hinunterklettern" if upper else "Hinaufklettern"
+		m.dynamic_root.add_child(ladder)
+		ladder.global_position = top if upper else bottom
+		ladder.add_to_group("bavaria_scene_ladders")
+		ladder.add_to_group("bavaria_roof_hatch_ladders")
 
 ## 11/2026: Antenne per Leiter besteigbar. Steigleiter vor der Außenseite des Gitterturms (mit Haltern
 ## am Turm), oben eine Gitterplattform mit Geländer rund um den Mast (unterhalb des Antennenmasts, unter dem
@@ -235,7 +316,11 @@ func _sniper_tree() -> void:
 		if EzTree.clumps_enabled():
 			for lmi in lib_leaf.find_children("*","MeshInstance3D",true,false):
 				var mi3 := lmi as MeshInstance3D
+				if mi3.mesh != null and mi3.mesh.get_surface_count() > 0 and not EzTree._is_alpha(mi3.material_override if mi3.material_override else mi3.mesh.surface_get_material(0)):
+					mi3.visible = false      # Stiele/Zweige des gestreckten Vorhangs: als gerade Stäbe sichtbar
+					continue
 				if mi3.mesh != null:
+					mi3.mesh = _drop_opaque(mi3.mesh, mi3.material_override)   # gerade Stiele des Vorhangs wirkten als Stäbe
 					mi3.mesh = EzTree.clump_mesh(mi3.mesh,mi3.mesh.get_aabb().get_center(),0.9,true,mi3.material_override)
 					mi3.material_override = null      # Materialien stecken jetzt in den Oberflächen
 		for i in 10:
@@ -287,6 +372,19 @@ func _sniper_tree() -> void:
 	# Einzelbaum wird nicht mit dem allgemeinen Wald vereinigt.
 	root.remove_from_group("bavaria_trees")
 	m._placed.append({"pos":center,"radius":8.0})
+
+## Nur Alpha-Oberflächen (Laub) behalten; undurchsichtige Stiele/Zweige des Laubvorhangs entfernen.
+static func _drop_opaque(src: Mesh, override: Material) -> Mesh:
+	if src == null or src.get_surface_count() < 2:
+		return src
+	var out := ArrayMesh.new()
+	for s in src.get_surface_count():
+		var mat: Material = override if override else src.surface_get_material(s)
+		if not EzTree._is_alpha(mat):
+			continue
+		out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, src.surface_get_arrays(s))
+		out.surface_set_material(out.get_surface_count() - 1, mat)
+	return out if out.get_surface_count() > 0 else src
 
 func blocks_sight(a: Vector3, b: Vector3) -> bool:
 	for volume in foliage:

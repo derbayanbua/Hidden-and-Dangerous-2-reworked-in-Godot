@@ -115,9 +115,11 @@ static func load_template(key: String) -> Node3D:
 			var c := Vector3(0, float(crown[0]) * float(HEIGHTS[key]), 0)
 			var leaf_mat := material(sp, true, float(HEIGHTS[key]))
 			# Dreiecksbudget: Büschel aus LOD2-Karten (≈ 1/3 der Karten, dafür größer) nah, aus LOD3 fern
-			var near := clump_mesh(l2, c, 1.25, false, leaf_mat)
+			# Kronenhülle (Runde 3): nah aus LOD1 (je Karte 2 Hüllkarten ≈ Budget vorher 3 × LOD2), fern aus LOD2
+			var dim := 0.8 if sp in ["birch", "fruit"] else 0.92    # helle Arten wirkten von oben grellgelb
+			var near := clump_mesh(l1, c, 1.15, false, leaf_mat, dim)
 			near.resource_name = src.resource_name
-			near.set_meta("ez_lod1", clump_mesh(l3, c, 1.6, false, leaf_mat))
+			near.set_meta("ez_lod1", clump_mesh(l2, c, 1.45, false, leaf_mat, dim))
 			(near.get_meta("ez_lod1") as Mesh).resource_name = src.resource_name + "_lod1"
 			near.set_meta("ez_lod2", l2)
 			near.set_meta("ez_lod3", src.get_meta("ez_lod3", l2))
@@ -142,7 +144,7 @@ static func clumps_enabled() -> bool:
 ## (size_k × Kartenkante) um den Kartenmittelpunkt, Drehung deterministisch je Karte; UV = UV-Ausschnitt der Karte.
 ## Normalen zeigen von `center` (Kronenmitte, Modellraum) nach außen → die Krone wird als Masse beleuchtet.
 ## only_alpha: nur Oberflächen mit Alpha-Material umbauen (Bibliotheksmodelle), übrige unverändert übernehmen.
-static func clump_mesh(src: Mesh, center: Vector3, size_k := 0.9, only_alpha := false, override: Material = null) -> ArrayMesh:
+static func clump_mesh(src: Mesh, center: Vector3, size_k := 0.9, only_alpha := false, override: Material = null, dim := 1.0) -> ArrayMesh:
 	var out := ArrayMesh.new()
 	out.set_meta("no_auto_lod", true)     # PerfTuning._generate_lods würde die Büschel zu UV-verschmierten Flächen verschmelzen
 	for s in src.get_surface_count():
@@ -165,6 +167,7 @@ static func clump_mesh(src: Mesh, center: Vector3, size_k := 0.9, only_alpha := 
 		var pv := PackedVector3Array()
 		var pn := PackedVector3Array()
 		var pu := PackedVector2Array()
+		var pc := PackedColorArray()
 		var pi := PackedInt32Array()
 		var card := 0
 		var t := 0
@@ -195,18 +198,32 @@ static func clump_mesh(src: Mesh, center: Vector3, size_k := 0.9, only_alpha := 
 			var h2 := fposmod(sin(float(card) * 78.233 + mid.z) * 24634.6345, 1.0)
 			var h3 := fposmod(sin(float(card) * 39.425 + mid.y) * 17431.123, 1.0)
 			card += 1
-			var basis := Basis.from_euler(Vector3(h1 * TAU, h2 * TAU, h3 * TAU))
 			var nrm := (mid - center)
-			nrm = nrm.normalized() if nrm.length() > 0.01 else Vector3.UP
-			for q in 3:
-				var ax: Vector3 = basis[q]
-				var ay: Vector3 = basis[(q + 1) % 3]
+			var dist := nrm.length()
+			nrm = nrm / dist if dist > 0.01 else Vector3.UP
+			# Kronenhülle (Runde 3): Karten liegen tangential zur Krone (Normale radial, Neigung ≤ ~40°, Drehung frei)
+			# → schuppige, geschlossene Oberfläche statt sternförmiger Kreuzkarten. Zwei versetzte Lagen je Karte,
+			# innere Lage dunkler (Vertexfarbe: Tiefe + Streuung je Karte).
+			var side := nrm.cross(Vector3.UP if absf(nrm.y) < 0.95 else Vector3.RIGHT).normalized()
+			for q in 2:
+				var tilt := Basis(side, (h1 - 0.5) * 1.4).rotated(nrm, (h2 + float(q) * 0.37) * TAU)
+				var n0: Vector3 = (tilt * nrm).normalized()
+				var ax: Vector3 = n0.cross(side).normalized()
+				if ax.length() < 0.1:
+					ax = n0.cross(Vector3.FORWARD).normalized()
+				ax = ax.rotated(n0, (h3 + float(q) * 0.5) * TAU)
+				var ay: Vector3 = n0.cross(ax).normalized()
+				var off := nrm * (0.18 if q == 0 else -0.28) * half + ax * (h2 - 0.5) * half * 0.6
+				var hq := half * (1.0 if q == 0 else 0.85)
+				var shade := clampf(0.78 + 0.22 * (dist / maxf(dist + half, 0.01)) + (h3 - 0.5) * 0.16, 0.6, 1.08) * (1.0 if q == 0 else 0.8) * dim
+				var col := Color(shade * (0.97 + h1 * 0.06), shade, shade * (0.94 + h2 * 0.08))
 				var base := pv.size()
 				for corner: Vector2 in [Vector2(-1, -1), Vector2(1, -1), Vector2(1, 1), Vector2(-1, 1)]:
-					var p: Vector3 = mid + (ax * corner.x + ay * corner.y) * half
+					var p: Vector3 = mid + off + (ax * corner.x + ay * corner.y) * hq
 					pv.append(p)
 					var n: Vector3 = p - center
-					pn.append((n.normalized() if n.length() > 0.01 else nrm).lerp(nrm, 0.3).normalized())
+					pn.append((n.normalized() if n.length() > 0.01 else nrm).lerp(nrm, 0.5).normalized())
+					pc.append(col)
 					pu.append(Vector2(lerpf(uv_lo.x, uv_hi.x, corner.x * 0.5 + 0.5), lerpf(uv_hi.y, uv_lo.y, corner.y * 0.5 + 0.5)))
 				pi.append_array([base, base + 1, base + 2, base, base + 2, base + 3])
 		if pv.is_empty():
@@ -216,6 +233,7 @@ static func clump_mesh(src: Mesh, center: Vector3, size_k := 0.9, only_alpha := 
 		na[Mesh.ARRAY_VERTEX] = pv
 		na[Mesh.ARRAY_NORMAL] = pn
 		na[Mesh.ARRAY_TEX_UV] = pu
+		na[Mesh.ARRAY_COLOR] = pc
 		na[Mesh.ARRAY_INDEX] = pi
 		out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, na)
 		var m2 := mat

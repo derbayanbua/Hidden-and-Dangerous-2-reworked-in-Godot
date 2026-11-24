@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.12.5 (24.11.2026)
+
+**DE**
+- Bavaria: Baumkronen als geschlossene Laubhülle mit Tiefenschattierung statt gekreuzter Karten; helle Laubarten
+  abgedunkelt; Stiele am Laubvorhang des Kletterbaums entfernt.
+- Bavaria: Das Antennenhaus hat eine Dachluke. Eine Leiter im Obergeschoss führt auf ein gesichertes Podest am First
+  neben der Antenne, im Einzel- und Mehrspieler; Bots können den Platz nutzen.
+
+**EN**
+- Bavaria: tree crowns rebuilt as a closed foliage shell with depth shading instead of crossed cards; bright leaf species
+  toned down; stems removed from the climbing tree's foliage curtain.
+- Bavaria: the antenna house has a roof hatch. A ladder on the upper floor leads to a railed platform on the ridge next to
+  the antenna, in single and multiplayer; bots can use the spot.
+
 ## 0.12.4 (24.11.2026)
 
 **DE**

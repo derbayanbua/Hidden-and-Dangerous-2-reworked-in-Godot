@@ -424,6 +424,8 @@ func house(id: String, pos: Vector3, w: float, d: float, h: float, yaw: float, k
 		gb.add_child(gcs)
 		n.add_child(gb)              # nicht unter das Mesh: merge_building_visuals gibt die Quellmeshes frei
 		gb.transform = gable.transform
+	if id == "haus_18_shed" and String(Game.cli.get("roof_hatch", "1")) != "0":   # --roof_hatch=0: Stand ohne Luke (Vergleich)
+		_roof_hatch_cut(n, w, d, h, roof_slope)
 	n.name = id
 	n.add_to_group("bavaria_buildings")
 	# Lesbare Fachwerk-/Putzfassaden, Fensterläden und niedriger Sockel.
@@ -660,6 +662,65 @@ func _cut_wall(wall: Node3D, cx: float, y0: float, y1: float, half: float) -> vo
 				if c is MeshInstance3D:
 					c.material_override = material
 		piece.free()
+
+## Dachluke im Antennenhaus (11/2026): Öffnung in der Dachplatte der +z-Traufseite neben dem First, im OG über dem
+## Flur (links vom Treppenloch x ≥ 1,98). Lage hausbezogen x 0,45…1,55, waagrecht z 0,75…1,85. Die Dachplatte wird
+## durch vier Teilplatten um die Öffnung ersetzt (Sicht + Kollision), dazu Lukenrahmen und aufgeklappter Deckel.
+## Leiter, Ausstiegspodest und Netzfläche baut scene_details._roof_hatch (Meta „roof_hatch“).
+const ROOF_HATCH := Rect2(0.45, 0.75, 1.10, 1.10)
+
+func _roof_hatch_cut(n: Node3D, w: float, d: float, h: float, slope: float) -> void:
+	var plate: Node3D = null
+	for c in n.get_children():
+		if c is StaticBody3D and absf(c.rotation.x - slope) < 0.001 and c.position.z > 0.0 and c.position.y > h - 0.5:
+			plate = c
+	if plate == null:
+		push_warning("Dachluke: Dachplatte nicht gefunden")
+		return
+	var mi: MeshInstance3D = null
+	for c in plate.get_children():
+		if c is MeshInstance3D:
+			mi = c
+	var size: Vector3 = (mi.mesh as BoxMesh).size
+	var length := size.z * plate.scale.z
+	var holder := Node3D.new()
+	holder.name = "DachplatteMitLuke"
+	n.add_child(holder)
+	holder.position = plate.position
+	holder.rotation = plate.rotation
+	var cz := cos(slope)
+	# waagrechte Hauslage → Plattenachse z' (Mitte der Platte = plate.position.z)
+	var za := (ROOF_HATCH.position.y - plate.position.z) / cz
+	var zb := (ROOF_HATCH.end.y - plate.position.z) / cz
+	var xa := ROOF_HATCH.position.x
+	var xb := ROOF_HATCH.end.x
+	var hx := size.x * 0.5
+	var hl := length * 0.5
+	var parts := [[-hx, hx, -hl, za], [-hx, hx, zb, hl], [-hx, xa, za, zb], [xb, hx, za, zb]]
+	for p in parts:
+		var body := lb.box(Vector3((p[0] + p[1]) * 0.5, 0, (p[2] + p[3]) * 0.5), Vector3(p[1] - p[0], size.y, p[3] - p[2]),
+			"roof", 0, true, holder)
+		for c in body.get_children():
+			if c is MeshInstance3D:
+				c.material_override = mi.material_override
+	# Lukenrahmen (Bohlen auf der Dachfläche, ohne Kollision: kein Hängenbleiben am Rand)
+	var top := size.y
+	for zz in [za - 0.05, zb + 0.05]:
+		lb.box(Vector3((xa + xb) * 0.5, top, zz), Vector3(xb - xa + 0.2, 0.10, 0.10), "darkwood", 0, false, holder)
+	for xx in [xa - 0.05, xb + 0.05]:
+		lb.box(Vector3(xx, top, (za + zb) * 0.5), Vector3(0.10, 0.10, zb - za + 0.2), "darkwood", 0, false, holder)
+	# Deckel an der unteren (traufseitigen) Kante angeschlagen, aufgeklappt über die Senkrechte hinaus
+	var hinge := Node3D.new()
+	hinge.name = "Lukendeckel"
+	holder.add_child(hinge)
+	hinge.position = Vector3((xa + xb) * 0.5, top + 0.10, zb + 0.08)
+	hinge.rotation.x = deg_to_rad(105.0)
+	lb.box(Vector3(0, 0, -(zb - za) * 0.5 - 0.06), Vector3(xb - xa + 0.12, 0.05, zb - za + 0.12), "wood", 0, false, hinge)
+	for zz in [-0.25, -(zb - za) + 0.13]:
+		lb.box(Vector3(0, 0.05, zz), Vector3(xb - xa, 0.04, 0.08), "darkwood", 0, false, hinge)
+	plate.free()
+	n.set_meta("roof_hatch", {"rect": ROOF_HATCH, "slope": slope, "eaves": h, "half_d": d * 0.5 + 0.4})
+	n.add_to_group("bavaria_roof_hatch_houses")
 
 ## Nach dem Aufbau aller Gebäude: freie Giebelseiten intakter Wohnhäuser bekommen ein OG-Fenster (Anbauten,
 ## Nachbarhäuser und Reihenhaus-Trennwände ausgenommen); danach Gebäudehülle neu zusammenfassen.

@@ -177,7 +177,61 @@ func _run() -> void:
 		var back := NavigationServer3D.map_get_path(map, deep, from, true)
 		check(into.size() > 1 and into[-1].distance_to(deep) < 0.6 and back.size() > 1 and back[-1].distance_to(from) < 2.0,
 			"Graben %s: per KI-Pfad erreichbar und wieder verlassbar" % trench.name)
+	await _check_roof_hatch(m, space, from)
 	_finish()
+
+## Dachluke im Antennenhaus: Loch in der Dachkollision, echter Auf-/Abstieg per Leiter, sicherer Stand, kein Durchfallen.
+func _check_roof_hatch(m: Mission, space: PhysicsDirectSpaceState3D, from: Vector3) -> void:
+	var house: Node3D = m.static_root.get_node("haus_18_shed")
+	check(house.has_meta("roof_hatch") and get_tree().get_nodes_in_group("bavaria_roof_hatch").size() == 1, "Dachluke im Antennenhaus vorhanden")
+	if not house.has_meta("roof_hatch"):
+		return
+	var r: Rect2 = house.get_meta("roof_hatch").rect
+	var center := house.to_global(Vector3(r.get_center().x, 9.0, r.get_center().y))
+	var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(center, center + Vector3.DOWN * 8.0, 1))
+	check(not hit.is_empty() and absf(house.to_local(hit.position).y - 3.18) < 0.1,
+		"Luke offen: Strahl durch die Öffnung trifft erst den OG-Boden (%.2f m)" % (house.to_local(hit.position).y if not hit.is_empty() else -1.0))
+	var beside := house.to_global(Vector3(r.end.x + 0.6, 9.0, r.get_center().y))
+	hit = space.intersect_ray(PhysicsRayQueryParameters3D.create(beside, beside + Vector3.DOWN * 8.0, 1))
+	check(not hit.is_empty() and house.to_local(hit.position).y > 6.5, "Dachfläche neben der Luke bleibt geschlossen")
+	var up: Node = null
+	var down: Node = null
+	for l in get_tree().get_nodes_in_group("bavaria_roof_hatch_ladders"):
+		if l.at_top:
+			down = l
+		else:
+			up = l
+	check(up != null and down != null, "Lukenleiter: unterer und oberer Endpunkt")
+	if up == null or down == null:
+		return
+	var path := NavigationServer3D.map_get_path(m.get_world_3d().navigation_map, from, up.top, true)
+	check(path.size() > 1 and path[-1].distance_to(up.top) < 1.0, "KI-Pfad vom Start über Treppe und Lukenleiter aufs Dachpodest")
+	var s := Soldier.new()
+	s.name = "Lukenpruefer"
+	m.actors_root.add_child(s)
+	s.global_position = up.bottom
+	s.velocity = Vector3.ZERO
+	for i in 10:
+		await get_tree().physics_frame
+	check(s.is_on_floor() and absf(s.global_position.y - up.bottom.y) < 0.15, "Leiterfuß steht auf dem OG-Boden")
+	check(up.can_interact(s), "Lukenleiter von innen benutzbar")
+	up.interact(s)
+	check(s.is_climbing(), "Aufstieg durch die Luke gestartet")
+	var until := Time.get_ticks_msec() + 20000
+	while s.is_climbing() and Time.get_ticks_msec() < until:
+		await get_tree().physics_frame
+	check(s.global_position.distance_to(up.top) < 0.2, "Aufstieg endet auf dem Dachpodest")
+	await get_tree().create_timer(1.5).timeout
+	check(s.is_on_floor() and absf(s.global_position.y - up.top.y) < 0.25, "Podest trägt: kein Durchfallen nach 1,5 s (%.2f m)" % s.global_position.y)
+	check(down.can_interact(s), "Abstieg oben erreichbar")
+	down.interact(s)
+	until = Time.get_ticks_msec() + 20000
+	while s.is_climbing() and Time.get_ticks_msec() < until:
+		await get_tree().physics_frame
+	check(s.global_position.distance_to(up.bottom) < 0.2, "Abstieg endet wieder im OG")
+	await get_tree().create_timer(1.5).timeout
+	check(s.is_on_floor() and absf(s.global_position.y - up.bottom.y) < 0.25, "OG-Boden trägt nach dem Abstieg (%.2f m)" % s.global_position.y)
+	s.queue_free()
 
 func _check_enterable_rooms(m: Mission, space: PhysicsDirectSpaceState3D, capsule: CapsuleShape3D) -> void:
 	var targets: Array[WindowTarget] = []
