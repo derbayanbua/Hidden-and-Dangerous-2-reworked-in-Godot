@@ -1,8 +1,8 @@
 extends RefCounted
-## Castle: Gebäude aus den lokal abgeleiteten LoD2-Daten (Wandpolygone + echte Dachpolygone, geschlossen, nicht
+## Castle: Gebäude aus den Gebäudedaten der Karte (Wandpolygone + echte Dachpolygone, geschlossen, nicht
 ## begehbar). Liegt ein Tor-/Wegpunkt in einem Gebäude, wird ein Durchgang (Tunnel mit Boden/Wänden/Decke) durch das
 ## Gebäude geschnitten. Sichtbares je Material zusammengefasst, Kollision als ein Trimesh je Bereich.
-## Castle buildings from local LoD2 data; optional gate passages cut through buildings.
+## Castle buildings from the map building data; optional gate passages cut through buildings.
 
 const MeshBatch := preload("res://src/maps/castle/castle_mesh.gd")
 const LayoutScript := preload("res://src/maps/castle/castle_layout.gd")
@@ -71,7 +71,7 @@ static func _half(n: Vector3, c3: Vector3, k: float) -> Plane:
 
 
 var _lb: LevelBuilder
-var helmets: Array = []        # {pos: Vector3 (Traufmitte), width, height, onion: bool} – Turmhelme statt LoD2-Kegeldach
+var helmets: Array = []        # {pos: Vector3 (Traufmitte), width, height, onion: bool} – Turmhelme statt Daten-Kegeldach
 var onion_id := ""             # Gebäude-ID, das den Zwiebelhelm bekommt (Uhrturm, falls plausibel)
 var helmets_recentered := 0    # Helme, deren Daten-Schwerpunkt außerhalb des Grundrisses lag
 var stats := {"facade": {}, "roof": {}}
@@ -208,7 +208,7 @@ func build(m: Node, list: Array, terrain, gate_points: Array, dir_fn: Callable, 
 	var outside := MeshBatch.new()
 	for b in list:
 		if String(b.get("kind", "")) == "bridge":
-			continue   # Gräben überbrückt castle.gd entlang des Hauptwegs (Deck), LoD2-Brückenblöcke entfallen
+			continue   # Gräben überbrückt castle.gd entlang des Hauptwegs (Deck), Daten-Brückenblöcke entfallen
 		var fp := fp_of(b)
 		if fp.size() < 3:
 			continue
@@ -238,7 +238,7 @@ func build(m: Node, list: Array, terrain, gate_points: Array, dir_fn: Callable, 
 		var split: bool = _split.has(String(b.id))
 		if split:
 			split_parts[String(b.id)] = {}
-		# kleine Türme mit Kegel-/Zeltdach: Turmhelm aus dem Pack statt LoD2-Dachfläche (Dach bleibt als Kollision)
+		# kleine Türme mit Kegel-/Zeltdach: Turmhelm aus dem Pack statt Daten-Dachfläche (Dach bleibt als Kollision)
 		var helm := false
 		if not split and String(b.get("roof_type", "")) in ["cone", "pyramid"] and float(b.get("footprint_area_m2", 0.0)) < 200.0 \
 				and float(b.ridge_y) - float(b.eave_y) > 1.5:
@@ -289,7 +289,7 @@ func build(m: Node, list: Array, terrain, gate_points: Array, dir_fn: Callable, 
 						mat = LayoutScript.ROOF_MATS[hv % 4] if _has("r_bib1") else (["c_roof", "c_roof2"][hv % 2])
 					elif _has("f_palas"):
 						var pk: String = sd[2] if sd.size() > 2 else "building"
-						# Abgleich 3D-Rundgang (Innerer Hof): Hauptburg = grober Bruch-/Tuffstein mit kleinen Fenstern, keine
+						# Gestaltung (Innerer Hof): Hauptburg = grober Bruch-/Tuffstein mit kleinen Fenstern, keine
 						# regelmäßigen Palastfenster → Tuffwand mit Kleinfenstern (Rückfall Palasfenster)
 						var plain := "f_tuffwin" if _has("f_tuffwin") else "f_palas"
 						mat = "f_tuff" if pk in ["tower", "gate", "wall"] else ("f_gothic" if sd.size() > 3 and sd[3] else plain)

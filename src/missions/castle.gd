@@ -1,8 +1,8 @@
 extends Mission
-## Testkarte „Castle“. Mit lokalen Daten echte Burg (castle_real.gd): DM/TDM in Hauptburg + zwei Vorhöfen (F, E, D,
-## innere Grenze an C|D), Eroberung über die ganze Burg mit sechs Zonen A–F (FRONTLINE), KI-Hinweise (castle_bot_hints.gd).
-## Ohne lokale Daten Platzhalter aus assets/maps/castle/layout.json: Grenzpolygon, welliges Gelände, Blöcke, 16 Starts,
-## 5 Zonen. Test map "Castle"; no original game data needed.
+## Testkarte „Castle“. Burganlage aus den Kartendaten assets/maps/castle/data/ (castle_real.gd): DM/TDM in Hauptburg +
+## zwei Vorhöfen (F, E, D, innere Grenze an C|D), Eroberung über die ganze Burg mit sechs Zonen A–F (FRONTLINE),
+## KI-Hinweise (castle_bot_hints.gd). Ohne Kartendaten Platzhalter aus assets/maps/castle/layout.json: Grenzpolygon,
+## welliges Gelände, Blöcke, 16 Starts, 5 Zonen. Test map "Castle"; no original game data needed.
 ## Direktstart: tools\godot.cmd -- --mission=castle (DM-Fläche) bzw. --mission=castle_occupation (ganze Burg).
 
 const LayoutScript := preload("res://src/maps/castle/castle_layout.gd")
@@ -38,8 +38,8 @@ class ZoneFrames:
 var runtime := ZoneFrames.new()
 
 
-## Echte Burg aus lokal abgeleiteten Daten (res://local/castle/derived/*.json, nicht im Repository); ohne sie
-## bleibt das Platzhalter-Layout. Real castle from local derived data when present, else the placeholder layout.
+## Burganlage aus den Kartendaten (castle_real.gd `data_dir()`); ohne sie bleibt das Platzhalter-Layout.
+## Castle from the map data when present, else the placeholder layout.
 const RealScript := preload("res://src/maps/castle/castle_real.gd")
 const Backdrop := preload("res://src/maps/castle/castle_backdrop.gd")
 var real = null      ## castle_real.gd-Instanz oder null (Platzhalter)

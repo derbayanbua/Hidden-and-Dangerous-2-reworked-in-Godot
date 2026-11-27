@@ -45,10 +45,11 @@ func _run() -> void:
 		check(Game.MISSIONS.has(id) and Game.MP_MAPS.has(id), "Im MP-Kartenregister: " + id)
 	check(Game.MP_MAPS.find("castle") > Game.MP_MAPS.find("bavaria"), "Castle am Ende der MP-Liste")
 	check(not Game.PRACTICE_MISSIONS.has("castle"), "Kein Übungseinsatz")
-	# Lokale Daten vorhanden → echte Burg muss gebaut sein (sonst wäre ein Baufehler als Platzhalter-Erfolg getarnt)
-	if FileAccess.file_exists("res://local/castle/derived/buildings.json") and String(Game.cli.get("castle_real", "1")) != "0":
+	# Kartendaten vorhanden → Burg muss gebaut sein (sonst wäre ein Baufehler als Platzhalter-Erfolg getarnt)
+	check(FileAccess.file_exists("res://assets/maps/castle/data/buildings.json"), "Öffentliche Kartendaten vorhanden")
+	if preload("res://src/maps/castle/castle_real.gd").available() and String(Game.cli.get("castle_real", "1")) != "0":
 		check(m.get("real") != null and m.real.buildings.count > 0 and (m.layout.get("spawns", []) as Array).size() >= 16,
-			"Echte Burg gebaut (lokale Daten vorhanden)")
+			"Burg aus Kartendaten gebaut")
 		if failed > 0:
 			_finish()
 			return
@@ -213,7 +214,7 @@ func _run_real(m: Mission) -> void:
 	var r = m.real
 	var space := m.get_world_3d().direct_space_state
 	print("CASTLE_STATS ", r.kit.stats, " Gebäude ", r.buildings.count, " Durchgänge ", r.buildings.passages.size(), " Brücken ", r.bridges.size())
-	check(r.buildings.count >= 80, "LoD2-Gebäude gebaut: %d" % r.buildings.count)
+	check(r.buildings.count >= 80, "Gebäude gebaut: %d" % r.buildings.count)
 	check(r.kit.stats.missing.is_empty(), "Bausatzmodelle vorhanden")
 	check(r.kit.stats.walk >= 150, "Wehrgangmodule am Bering: %d" % r.kit.stats.walk)
 	check(r.kit.stats.towers >= 3, "Besteigbare Türme: %d" % r.kit.stats.towers)
@@ -407,7 +408,7 @@ func _run_real(m: Mission) -> void:
 	print("CASTLE_GARTEN ", r.garden.size(), " Teile, Deko ", r.cover.size(), " Requisiten ", r.kit.stats.get("props", 0))
 	check(r.garden.size() >= 6, "Garten im Hof B: %d Teile" % r.garden.size())
 	check(r.cover.size() >= 15, "Kriegsdeko/Deckung in den Höfen: %d" % r.cover.size())
-	# Hofausstattung nach Referenzansichten (castle_dressing)
+	# Hofausstattung nach Entwurf (castle_dressing)
 	if String(Game.cli.get("castle_dressing", "1")) != "0":
 		var ds: Dictionary = r.dressing.stats
 		print("CASTLE_DRESSING_TEST ", ds)

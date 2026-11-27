@@ -1,5 +1,5 @@
 extends RefCounted
-## Castle (echte Burg): Hofausstattung nach dem Abgleich mit Referenzansichten der Höfe (0.12.2).
+## Castle (echte Burg): Hofausstattung nach eigenem Entwurf der Höfe (0.12.2).
 ## - Laubbäume in den Rasenhöfen (Torhof E als Park, je 1–4 in A–D) und ein Hausbaum im Hof der Hauptburg F
 ## - Hecken entlang des Hauptwegs (C, B, A), Straßenlaternen (A, B, C), Holzbänke (E, F, B)
 ## - Hauptburg: überdachte Holzaußentreppen an Hofwänden (begehbar, Podest auf 2,7 m), Kanonenkugelpyramide
@@ -147,7 +147,7 @@ func _hedges(r, m: Node) -> void:
 	# (glatter grüner Körper) nur noch als Rückfall ohne Bibliotheksmodell
 	# Sommerstrauch mit Laubkarten (Alpha-Maske, wie der dichte Randsaum der Testkarte); der Bibliotheks-Heckenstrauch ist
 	# nur facettierte Vertexfarbe (Kontrollbild hof_c) und bleibt Rückfall
-	# 3D-Rundgang (3./4. Vorhof): dicht geschnittene, kastenförmige Hecken ~1,15 m hoch, ~1,1 m breit → eigene Laubtextur
+	# Gestaltung (3./4. Vorhof): dicht geschnittene, kastenförmige Hecken ~1,15 m hoch, ~1,1 m breit → eigene Laubtextur
 	# (c_hedge, tools/gen_castle_ground.py) auf abgerundetem Heckenkörper; lose Sträucher nur ohne diese Textur
 	var hm: StandardMaterial3D = r._lb_mats.get("c_hedge") as StandardMaterial3D
 	var cut: bool = hm != null and hm.albedo_texture != null

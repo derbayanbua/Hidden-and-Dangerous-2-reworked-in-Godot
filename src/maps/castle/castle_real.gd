@@ -1,11 +1,17 @@
 extends RefCounted
-## Castle: echte Burg aus lokal abgeleiteten Daten (nur zur Laufzeit aus res://local/castle/derived/ gelesen;
-## keine Koordinaten im Repository). Abschnitte A–F = Höfe, Spielfläche = Bering (Umriss West + Ost).
-## Gelände (Höhenfeld), LoD2-Gebäude, Bering mit Wehrgang/Treppen, Quermauern mit Toren, Türme mit Leiter,
-## Grabenbrücken entlang des Hauptwegs, Deckung 1944/45, Platzhalter-Starts/Zonen.
-## Real castle builder from local derived data (runtime only).
+## Castle: Burganlage aus den Kartendaten assets/maps/castle/data/ (lokale Spielkoordinaten in m, erzeugt von
+## tools/castle_public_data.py; Ersatz: lokale Arbeitsdaten res://local/castle/derived/). Abschnitte A–F = Höfe,
+## Spielfläche = Bering (Umriss West + Ost). Gelände (Höhenfeld), Gebäude, Bering mit Wehrgang/Treppen, Quermauern mit
+## Toren, Türme mit Leiter, Grabenbrücken entlang des Hauptwegs, Deckung 1944/45, Starts/Zonen.
+## Castle builder from the map data in assets/maps/castle/data/ (fallback: local working data).
 
-const DATA := "res://local/castle/derived/"
+const DATA_PUBLIC := "res://assets/maps/castle/data/"
+const DATA_LOCAL := "res://local/castle/derived/"
+
+
+## Kartendaten: öffentliche Fassung, falls vorhanden, sonst lokale Arbeitsdaten
+static func data_dir() -> String:
+	return DATA_PUBLIC if FileAccess.file_exists(DATA_PUBLIC + "buildings.json") else DATA_LOCAL
 const MeshBatch := preload("res://src/maps/castle/castle_mesh.gd")
 const TerrainScript := preload("res://src/maps/castle/castle_terrain.gd")
 const BuildingsScript := preload("res://src/maps/castle/castle_buildings.gd")
@@ -45,15 +51,15 @@ var spawn_sets := {}               # "dm" / "tdm" / "occupation" → Array {pos:
 
 static func available() -> bool:
 	for f in ["buildings.json", "castle_features.json", "terrain.json"]:
-		if not FileAccess.file_exists(DATA + f):
+		if not FileAccess.file_exists(data_dir() + f):
 			return false
 	return true
 
 
 static func _json(name: String) -> Dictionary:
-	if not FileAccess.file_exists(DATA + name):
+	if not FileAccess.file_exists(data_dir() + name):
 		return {}
-	var d = JSON.parse_string(FileAccess.get_file_as_string(DATA + name))
+	var d = JSON.parse_string(FileAccess.get_file_as_string(data_dir() + name))
 	return d if typeof(d) == TYPE_DICTIONARY else {}
 
 
@@ -76,7 +82,7 @@ func in_building(p: Vector2, grow := 0.0) -> bool:
 	return false
 
 
-## Gebäudeart am Punkt ("" = frei); LoD2-Mauern/Bauwerke ("wall"/"structure") werden nie durchtunnelt
+## Gebäudeart am Punkt ("" = frei); Daten-Mauern/Bauwerke ("wall"/"structure") werden nie durchtunnelt
 func building_kind_at(p: Vector2, grow := 0.0) -> String:
 	for e in _fp_boxes:
 		if (e[0] as Rect2).grow(grow).has_point(p):
@@ -225,7 +231,7 @@ func build(m: Node) -> Dictionary:
 	_build_cross_walls()
 	_build_details(bdata.get("buildings", []))
 	_build_cover(m)
-	# Hofausstattung nach Referenzansichten (Bäume, Hecken, Laternen, Bänke, Außentreppen, Grabenzaun); --castle_dressing=0 aus
+	# Hofausstattung nach Entwurf (Bäume, Hecken, Laternen, Bänke, Außentreppen, Grabenzaun); --castle_dressing=0 aus
 	if String(Game.cli.get("castle_dressing", "1")) != "0":
 		dressing.build(self, m)
 	restricted = play_mode in [0, 1]
@@ -273,9 +279,9 @@ func _ground_material(x: float, z: float) -> String:
 		return "c_ditch"
 	if dh > 0.6:
 		return "c_slope"
-	# Referenzansichten: Fahrweg durch alle Höfe gepflastert (Katzenkopf), daneben Kiesstreifen; Hauptburghof ganz gepflastert
+	# Gestaltung: Fahrweg durch alle Höfe gepflastert (Katzenkopf), daneben Kiesstreifen; Hauptburghof ganz gepflastert
 	if section_of(p) == "F":
-		# 3D-Rundgang: Innerer Hof ganz mit Flusskieseln gepflastert
+		# Gestaltung: Innerer Hof ganz mit Flusskieseln gepflastert
 		for k in ["c_pebble", "c_cobble", "c_paving"]:
 			if _lb_mats.has(k):
 				return k
@@ -397,7 +403,7 @@ func deck_height(p: Vector2) -> float:
 	return terrain.height(p.x, p.y)
 
 
-## Brücken vor diesen Quermauer-Toren sind Holzbrücken (Bohlendeck, Holzgeländer, Holzjoche) – Referenzansicht;
+## Brücken vor diesen Quermauer-Toren sind Holzbrücken (Bohlendeck, Holzgeländer, Holzjoche) – Gestaltung;
 ## alle übrigen Grabenbrücken Stein
 const WOOD_BRIDGE_DIVIDERS := ["D|E"]
 
@@ -501,9 +507,9 @@ func _deck(mb: MeshBatch, pts: Array, s: int, e: int, ya: float, yb: float) -> v
 var detail_stats := {"helmets": 0, "onion": 0, "chimneys": 0, "dormers": 0, "portals": 0, "boulders": 0}
 
 
-## Uhrturm: LoD2 setzt die Traufe sehr tief (≈ 3 m) und das Dach bis zum Knauf (≈ 10 m) – mit dem Zwiebelhelm darauf
-## saß die Zwiebel am Boden (Kontrollbild hof_a). Referenzansicht: hoher verputzter Schaft, Zwiebel oben. Schaft daher bis
-## 60 % der LoD2-Gesamthöhe aufmauern (Kiste entlang der längsten Grundrisskante, Gesims), Helm darauf. Gibt die neue
+## Uhrturm: die Gebäudedaten setzen die Traufe sehr tief (≈ 3 m) und das Dach bis zum Knauf (≈ 10 m) – mit dem Zwiebelhelm darauf
+## saß die Zwiebel am Boden (Kontrollbild hof_a). Gestaltung: hoher verputzter Schaft, Zwiebel oben. Schaft daher bis
+## 60 % der Daten-Gesamthöhe aufmauern (Kiste entlang der längsten Grundrisskante, Gesims), Helm darauf. Gibt die neue
 ## Traufmitte zurück; Türme mit plausibler Traufe bleiben unverändert.
 const ONION_SHAFT_K := 0.6
 func _onion_shaft(h: Dictionary) -> Vector3:
@@ -542,7 +548,7 @@ func _onion_shaft(h: Dictionary) -> Vector3:
 	return Vector3(c2.x, new_eave, c2.y)
 
 
-## Burgfassaden-Pack: Turmhelme statt LoD2-Kegeldächern (Zwiebelhelm am Uhrturm), einige Kamine und Gauben,
+## Burgfassaden-Pack: Turmhelme statt Daten-Kegeldächern (Zwiebelhelm am Uhrturm), einige Kamine und Gauben,
 ## Torrahmen an den Durchgangsenden, Nagelfluh-Felsbrocken auf den Hängen außerhalb des Berings (nur Optik)
 func _build_details(list: Array) -> void:
 	var rng := RandomNumberGenerator.new()
@@ -562,7 +568,7 @@ func _build_details(list: Array) -> void:
 		var sy: float = maxf(hh, 2.0) / (4.48 if onion else 5.8)
 		kit.place(model, Transform3D(Basis().scaled(Vector3(sx, sy, sx)), hpos))
 		if onion:
-			print("CASTLE_ONION Helm auf %s: Traufe %.1f m über Gelände (LoD2 %.1f m), Breite %.1f m, Helmhöhe %.1f m, Helme auf Grundrissmitte versetzt %d" % [
+			print("CASTLE_ONION Helm auf %s: Traufe %.1f m über Gelände (Daten %.1f m), Breite %.1f m, Helmhöhe %.1f m, Helme auf Grundrissmitte versetzt %d" % [
 				buildings.onion_id, hpos.y - float(h.ground), float(h.pos.y) - float(h.ground), hw, hh, buildings.helmets_recentered])
 		detail_stats.helmets += 1
 		detail_stats.onion += int(onion)
@@ -1058,7 +1064,7 @@ func _plan_f_access(gps: Array) -> void:
 		return
 	_flood_f(start)
 	var added := 0
-	var skip := PackedByteArray()     # Flächen ohne möglichen Durchgang (z. B. hinter LoD2-Mauern) überspringen
+	var skip := PackedByteArray()     # Flächen ohne möglichen Durchgang (z. B. hinter Daten-Mauern) überspringen
 	skip.resize(n)
 	for _iter in 10:
 		# größte nicht erreichte freie Fläche

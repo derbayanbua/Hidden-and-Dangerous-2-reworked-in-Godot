@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.12.6 (27.11.2026)
+
+**DE**
+- **Testkarte Castle jetzt in allen Paketen vollständig:** Die Burganlage (Höfe, Gebäude, Bering mit Wehrgang, Türme,
+  Gräben, Wege, Umgebung) wird aus Kartendaten in `assets/maps/castle/data/` gebaut. Bisher fehlten diese Daten im
+  öffentlichen Paket, dort erschien nur eine vereinfachte Ersatzkarte. Die Karte ist an eine Burganlage angelehnt; die
+  Daten enthalten nur Spielkoordinaten in Metern.
+- Neues Werkzeug `tools/castle_public_data.py` erzeugt die Kartendaten und prüft sie.
+
+**EN**
+- **Test map Castle now complete in every package:** the castle (courts, buildings, curtain wall with wall walk, towers,
+  ditches, paths, surroundings) is built from map data in `assets/maps/castle/data/`. Until now this data was missing
+  from the public package, which showed only a simplified fallback map. The map is loosely based on a castle; the data
+  contains only game coordinates in metres.
+- New tool `tools/castle_public_data.py` generates and checks the map data.
+
 ## 0.12.5 (24.11.2026)
 
 **DE**

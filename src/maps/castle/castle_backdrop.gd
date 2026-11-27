@@ -3,16 +3,16 @@ extends RefCounted
 ## (Putz, Ziegel, Stand 1944/45), See und Fluss als Wasserflächen, Hangwald (EZ-Tree-Impostor, nah 3D), Ferngelände
 ## außerhalb des Datenrasters, Fernhügel als Horizont. Rein optisch: keine Kollision, nicht in der Navmesh-Quelle (Kind der
 ## Mission, nicht static_root; Navmesh liest nur statische Kollider), ohne Schatten, je Block ein Zeichenaufruf.
-## Daten nur aus res://local/castle/derived/ (lokal, nicht im Repository). Fehlen sie, entsteht nichts.
+## Daten aus den Castle-Kartendaten (castle_real.gd `data_dir()`). Fehlen sie, entsteht nichts.
 ## Backdrop of the Castle test map (houses, lake/river, forest, far terrain, far hills). Visual only: no collision, not
-## part of the navmesh source, no shadows. Data only from local/castle/derived/; without it nothing is built.
+## part of the navmesh source, no shadows. Data from the Castle map data; without it nothing is built.
 ##
 ## Aufruf / call: `Backdrop.build(mission)` nach dem Burgbau. Schalter `--castle_backdrop=0` = aus.
 ## Baut die Mission das Gelände des Datenrasters selbst (`mission.real.terrain`), entsteht hier nur das Ferngelände
 ## außerhalb; Höhen dann über `mission.ground_y`. Optionale Missionsmethode `backdrop_exclude_polygons()` ->
 ## Array[PackedVector2Array] (x/z): zusätzlich zu Abschnittspolygonen + Halsgraben + Kartengrenze keine Häuser/Bäume.
 
-const DATA := "res://local/castle/derived/"
+const RealData := preload("res://src/maps/castle/castle_real.gd")
 const EzTree := preload("res://src/maps/bavaria/eztree.gd")
 
 ## Ergebnis des letzten Aufbaus (Tests/Messung)
@@ -25,8 +25,8 @@ static func build(m: Node) -> void:
 		return
 	if m.get_node_or_null("CastleBackdrop") != null:
 		return
-	if not FileAccess.file_exists(DATA + "terrain.json"):
-		print("CASTLE_BACKDROP: keine lokalen Daten – übersprungen / no local data, skipped")
+	if not FileAccess.file_exists(RealData.data_dir() + "terrain.json"):
+		print("CASTLE_BACKDROP: keine Kartendaten – übersprungen / no map data, skipped")
 		return
 	var b := Builder.new()
 	b.run(m)
@@ -203,9 +203,9 @@ class Builder:
 
 	# ------------------------------------------------------------------ Daten
 	func _json(f: String) -> Dictionary:
-		if not FileAccess.file_exists(DATA + f):
+		if not FileAccess.file_exists(RealData.data_dir() + f):
 			return {}
-		var d = JSON.parse_string(FileAccess.get_file_as_string(DATA + f))
+		var d = JSON.parse_string(FileAccess.get_file_as_string(RealData.data_dir() + f))
 		return d if d is Dictionary else {}
 
 	func _load_terrain(t: Dictionary) -> void:
@@ -951,7 +951,7 @@ void fragment() {
 		var rl = b.get("ridge_line")
 		var has_line := rl is Array and (rl as Array).size() >= 2 \
 			and Vector2(float(rl[0][0]), float(rl[0][2])).distance_to(Vector2(float(rl[-1][0]), float(rl[-1][2]))) >= 0.5
-		# Kirche: LoD2 fasst Schiff + Turm zusammen (Traufe fast am Boden, First = Turmspitze, keine Firstlinie)
+		# Kirche: die Gebäudedaten fassen Schiff + Turm zusammen (Traufe fast am Boden, First = Turmspitze, keine Firstlinie)
 		# → Schiff mit Satteldach + quadratischer Turm mit Spitzhelm am Westende.
 		if not has_line and not (kind in ["pyramid", "cone", "tower"]) and ridge - eave > 15.0:
 			_church(acc, fpw, cen, g, ridge, roof_c)

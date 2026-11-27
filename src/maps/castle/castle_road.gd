@@ -2,7 +2,7 @@ extends RefCounted
 ## Castle: Hauptweg als eigene Bänder über dem Gelände (nur Darstellung, ohne Kollision, unter dynamic_root → nicht im
 ## Navmesh). Vorher wurde das Wegmaterial je 2-m-Geländezelle vergeben (treppige Ränder). Jetzt:
 ## - Wegachse mit abgerundeten Knicken (Chaikin, Schnitt ≤ 4 m je Ecke → Abweichung vom Datenweg < 0,6 m)
-## - Abgleich 3D-Rundgang: innere Vorhöfe Flusskieselpflaster ±2,4 m mit zwei Reihen Randsteinen, äußere Vorhöfe heller
+## - Gestaltung: innere Vorhöfe Flusskieselpflaster ±2,4 m mit zwei Reihen Randsteinen, äußere Vorhöfe heller
 ##   Sandweg ±2,6 m mit einer Reihe; außen ein schmaler Sandsaum, der über 0,85 m weich ins Gras ausläuft
 ##   (Alpha-Hash über Vertexfarbe, Texturen weiter weltbezogen triplanar → nahtlos zum Gelände)
 ## Unterbrochen über Gräben (Brücken), in Gebäuden/Durchgängen und im ganz gepflasterten Hof F.
@@ -12,7 +12,7 @@ const STEP := 1.0                     # Abtastung entlang der Achse [m]
 const COBBLE_HALF := 2.4             # Kieselpflaster ±2,4 m
 const SAND_HALF := 2.6                # Sandweg ±2,6 m
 const KERB_W := 0.22                  # eine Reihe Granit-Randsteine
-const PEBBLE_SECTIONS := ["D", "E"]   # innere Vorhöfe gepflastert (Rundgang 2. Vorhof; E Annahme), A–C Sandweg
+const PEBBLE_SECTIONS := ["D", "E"]   # innere Vorhöfe gepflastert (2. Vorhof; E Annahme), A–C Sandweg
 const LIFT_COBBLE := 0.055
 const LIFT_KERB := 0.075
 const LIFT_GRAVEL := 0.035
@@ -117,7 +117,7 @@ func build(r, m: Node) -> void:
 		stats.length_m += (samples[k][0] as Vector2).distance_to(samples[k + 1][0])
 		var a: Array = samples[k]
 		var b: Array = samples[k + 1]
-		# 3D-Rundgang: innere Höfe (D, E) Flusskieselpflaster mit zwei Reihen Granit-Randsteinen,
+		# Gestaltung: innere Höfe (D, E) Flusskieselpflaster mit zwei Reihen Granit-Randsteinen,
 		# äußere Höfe (A, B, C) heller Sandweg mit einer Reihe Randsteinen; beidseits schmaler, auslaufender Sandsaum
 		var pebble: bool = String(r.section_of(a[0])) in PEBBLE_SECTIONS
 		var half := COBBLE_HALF if pebble else SAND_HALF

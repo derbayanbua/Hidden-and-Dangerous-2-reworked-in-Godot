@@ -115,10 +115,10 @@ const KIT_MATERIALS := [
 	["c_earth", "keller_erdreich", 0.2, Color(0.9, 0.85, 0.78)],
 	["c_moss", "tuffstein_moosig", 0.25, Color.WHITE],
 	["c_wood", "holz_eiche_altert", 0.5, Color.WHITE],
-	# Abgleich mit Referenzansichten (0.12.2): Hauptweg und Hof der Hauptburg mit Katzenkopfpflaster, Gehstreifen Kies
+	# Gestaltung (0.12.2): Hauptweg und Hof der Hauptburg mit Katzenkopfpflaster, Gehstreifen Kies
 	["c_cobble", "katzenkopfpflaster", 0.9, Color(0.92, 0.92, 0.9)],
 	["c_gravel", "erdweg_kies", 0.35, Color(0.95, 0.93, 0.9)],
-	# Abgleich 3D-Rundgang (0.12.2): Flusskieselpflaster (innere Höfe) und heller Sandweg (äußere Höfe), eigene prozedurale
+	# Gestaltung (0.12.2): Flusskieselpflaster (innere Höfe) und heller Sandweg (äußere Höfe), eigene prozedurale
 	# Texturen aus tools/gen_castle_ground.py (Kachel 1,2 m bzw. 2,0 m)
 	["c_pebble", "flusskiesel_pflaster", 0.83, Color.WHITE],
 	["c_sand", "sandweg_hell", 0.5, Color(0.88, 0.86, 0.82)],
@@ -205,7 +205,7 @@ static func apply_pack17_materials(lb: LevelBuilder) -> void:
 			m.uv1_world_triplanar = true
 			m.uv1_scale = Vector3.ONE * float(s[2])
 		else:
-			# LoD2-Wand-/Dachflächen beidseitig: einzelne verdreht orientierte Teilflächen ließen sonst Himmelsstreifen durch
+			# Daten-Wand-/Dachflächen beidseitig: einzelne verdreht orientierte Teilflächen ließen sonst Himmelsstreifen durch
 			m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		lb._mats[String(s[0])] = m
 
