@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.12.7 (27.11.2026)
+
+**DE**
+- **Öffentliches Paket – Bäume:** Die Fernbäume (Impostor-Bilder der eigenen EZ-Tree-Bäume) und die Rindentexturen
+  fehlten im öffentlichen Paket. Dadurch entfiel der Wald um Castle, und die Baumstämme waren ohne Rindenfarbe. Beides ist
+  jetzt enthalten (Castle und Bavaria).
+
+**EN**
+- **Public package – trees:** the far trees (impostor images of the own EZ-Tree trees) and the bark textures were
+  missing from the public package, so the forest around Castle was absent and tree trunks had no bark colour. Both are
+  now included (Castle and Bavaria).
+
 ## 0.12.6 (27.11.2026)
 
 **DE**

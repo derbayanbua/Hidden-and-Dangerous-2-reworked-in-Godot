@@ -41,6 +41,9 @@ assets/maps/bavaria/panorama/source/
 !assets/maps/bavaria/trees_eztree/*.png.import
 !assets/maps/bavaria/trees_eztree/*.jpg
 !assets/maps/bavaria/trees_eztree/*.jpg.import
+# Impostor-Atlanten = Renderbilder dieser Bäume (Fernwald Bavaria/Castle): ebenfalls öffentlich.
+!assets/maps/bavaria/trees_eztree/impostor/*.png
+!assets/maps/bavaria/trees_eztree/impostor/*.png.import
 # Projekteigene, selbst erstellte Bibliotheks-Assets (frei nutzbar): öffentlich.
 !assets/maps/bavaria/library/
 !assets/maps/bavaria/library/**/*.png
